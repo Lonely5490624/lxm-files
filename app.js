@@ -24,7 +24,7 @@ app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'jade');
 
 app.all('*', function(req, res, next) {
-  res.header('Access-Control-Allow-Origin', 'http://localhost:8081');
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
   res.header('Access-Control-Allow-Methods', 'PUT GET POST DELETE OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Content-Length, Authorization, Accept, X-Requested-With');
   res.header('Access-Control-Allow-Credentials', true);

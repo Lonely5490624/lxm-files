@@ -12,10 +12,31 @@ const trans = require('../config/transaction')
 
 const staffRootDir = `${process.cwd()}/files/staff`
 
-router.post('/addDepartment', async (req, res, next) => {
+router.get('/getDepartment', (req, res, next) => {
+	conn.getConnection((error, connection) => {
+		if (error) return;
+		connection.query(depQuery.selectDepAll(), (err, rows) => {
+			if (rows && rows.length) {
+				let data = Util.listToTree(rows, 'dep_id', 'par_id')
+				Util.sendResult(res, 0 ,'查询成功', data)
+				connection.release()
+			}
+		})
+	})
+})
+
+router.post('/addDepartment', (req, res, next) => {
 	const obj = req.body
 	const uid = req.user.uid
 	obj.create_uid = uid
+	let {
+		par_id,
+		dep_name
+	} = obj
+	if (!par_id || !dep_name) {
+		Util.sendResult(res, 1003, '参数缺失')
+		return
+	}
 	conn.getConnection(function(error, connection) {
 		if (error) {
 			// log error, whatever

@@ -11,6 +11,24 @@ const dirQuery = require('../config/queries/dir')
 const perQuery = require('../config/queries/permission')
 const conn = require('../config/connection')
 
+router.get('/getJobList', (req, res, next) => {
+    const dep_id = req.query.dep_id
+    const uid = req.user.uid
+    if (!dep_id) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+    conn.getConnection((error, connection) => {
+        if (error) return
+        connection.query(jobQuery.selectJobWithDepId(dep_id), (err, rows) => {
+            if (rows && rows.length) {
+                Util.sendResult(res, 0, '查询成功', rows)
+                connection.release()
+            }
+        })
+    })
+})
+
 router.post('/addJob', (req, res, next) => {
     const body = req.body
     const uid = req.user.uid

@@ -16,6 +16,11 @@ function selectDepLikePath(dep_dir) {
     return sql
 }
 
+function selectDepAll() {
+    const sql = `SELECT * FROM lxm_user_department WHERE is_delete = 0`
+    return sql
+}
+
 function addDepartment(values) {
     const sql = `INSERT INTO lxm_user_department (
         dep_name,
@@ -51,6 +56,7 @@ module.exports = {
     selectDepWithId,
     selectDepWithDir,
     selectDepLikePath,
+    selectDepAll,
     addDepartment,
     updateDepNameWithId,
     updateDepPathWithPath

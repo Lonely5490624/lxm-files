@@ -3,7 +3,7 @@ var jwt = require('jsonwebtoken')
 var Util = require('../controller/util')
 
 module.exports = function (req, res, next) {
-    if (req.path === '/api/users/login' || req.path === '/api/users/superReg' || req.path === '/api/users/regUserCommon') {
+    if (req.method === 'OPTIONS' || req.path === '/api/users/login' || req.path === '/api/users/superReg' || req.path === '/api/users/regUserCommon') {
         // 登录不需要token验证
         next()
         return
@@ -15,8 +15,10 @@ module.exports = function (req, res, next) {
         jwt.verify(token, 'lexuemao_2019_jwt', (err, decoded) => {
             if (err) {
                 if (err.message === 'invalid signature') {
+                    res.clearCookie('token')
                     Util.sendResult(res, 1003, 'token验证失败，请重新登录')
                 } else if (err.message === 'jwt expired') {
+                    res.clearCookie('token')
                     Util.sendResult(res, 1003, 'token过期，请重新登录')
                 }
             } else {

@@ -10,6 +10,11 @@ function selectJobWithId(job_id) {
     return sql
 }
 
+function selectJobWithDepId(dep_id) {
+    const sql = `SELECT * FROM lxm_user_job WHERE dep_id = ${dep_id} AND is_delete = 0`
+    return sql
+}
+
 function selectJobLikePath(path) {
     const sql = `SELECT * FROM lxm_user_job WHERE job_dir like '${path}%' AND is_delete = 0`
     return sql
@@ -50,6 +55,7 @@ function updateJobPathWithPath(old_path, new_path, update_uid) {
 module.exports = {
     selectJobWithPath,
     selectJobWithId,
+    selectJobWithDepId,
     selectJobLikePath,
     selectJobList,
     addJob,
