@@ -10,6 +10,8 @@ const userQuery = require('../config/queries/user')
 const dirQuery = require('../config/queries/dir')
 const fileQuery = require('../config/queries/file')
 const perQuery = require('../config/queries/permission')
+const jobQuery = require('../config/queries/job')
+const depQuery = require('../config/queries/department')
 
 router.get('/getDirList', (req, res, next) => {
     const uid = req.user.uid
@@ -18,6 +20,9 @@ router.get('/getDirList', (req, res, next) => {
 			// log error, whatever
 			return;
         }
+        let job_id = undefined
+        let dep_id = undefined
+        let is_manager = undefined
         let homefolder = undefined
         let dir_arr = undefined
         let exceptId = undefined
@@ -31,13 +36,41 @@ router.get('/getDirList', (req, res, next) => {
 				});
             },
             function(callback) {
-                // 查询用户的目录
+                // 查询当前用户的岗位，是否为管理岗
                 connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
                     if (rows && rows.length) {
-                        homefolder = rows[0].homefolder
-                    }
-                    callback(err)
+                        job_id = rows[0].job_id
+                        dep_id = rows[0].dep_id
+                        connection.query(jobQuery.selectJobWithId(job_id), (err2, rows2) => {
+                            if (rows2 && rows2.length) {
+                                is_manager = rows2[0].is_manager
+                            }
+                            callback(err2)
+                        })
+                    } else callback(err)
                 })
+            },
+            function(callback) {
+                /**
+                 * 若为管理者，则查询当前部门下所有目录
+                 * 若不为管理者，则只查询当前用户下的所有目录
+                 */
+                if (is_manager) {
+                    connection.query(depQuery.selectDepWithId(dep_id), (err, rows) => {
+                        if (rows && rows.length) {
+                            homefolder = rows[0].dep_dir
+                        }
+                        callback(err)
+                    })
+                } else {
+                    // 查询用户的目录
+                    connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
+                        if (rows && rows.length) {
+                            homefolder = rows[0].homefolder
+                        }
+                        callback(err)
+                    })
+                }
             },
             function(callback) {
                 // 通过用户目录查询所有目录
@@ -135,6 +168,7 @@ router.post('/addDir', (req, res, next) => {
         let dir_name = body.dir_name
         let dir_pid = body.dir_pid
         let path = undefined
+        let is_share = 0
         
 		// 创建事务列表
 		const tasks = [
@@ -147,7 +181,6 @@ router.post('/addDir', (req, res, next) => {
             function(callback) {
                 // 查询该用户的权限
                 connection.query(perQuery.selectPermissionWithUid(uid), (err, rows) => {
-                    console.log(1111, rows)
                     if (rows && rows.length && rows[0].create_dir) {
                     } else {
                         Util.sendResult(res, 1004, '没有权限')
@@ -162,6 +195,7 @@ router.post('/addDir', (req, res, next) => {
                 connection.query(dirQuery.selectDirWithId(dir_pid), (err, rows) => {
                     if (rows && rows.length) {
                         path = `${rows[0].dir_path}/${dir_name}`
+                        is_share = rows[0].is_share // 若上级目录为分享目录，则下面也为分享目录
                     } else {
                         Util.sendResult(res, 1000, '上级目录不存在')
                         connection.release()
@@ -201,7 +235,13 @@ router.post('/addDir', (req, res, next) => {
                     uniq: uuidv1(),
                     create_uid: uid
                 }
-                connection.query(dirQuery.addDir(values), err => {
+                let addDir = null
+                if(is_share === 1) {
+                    addDir = dirQuery.addDirShare
+                } else {
+                    addDir = dirQuery.addDir
+                }
+                connection.query(addDir(values), err => {
                     callback(err)
                 })
             }

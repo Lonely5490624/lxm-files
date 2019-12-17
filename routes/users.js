@@ -341,6 +341,28 @@ router.get('/getUserStaff', (req, res, next) => {
 	})
 })
 
+router.get('/canSetDep', (req, res, next) => {
+	const uid = req.user.uid
+	conn.getConnection((error, connection) => {
+		if (error) return
+		connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
+			if (rows && rows.length) {
+				const job_id = rows[0].job_id
+				if (job_id === 0) {
+					Util.sendResult(res, 0, '查询成功', 1)
+				} else {
+					connection.query(jobQuery.selectJobWithId(job_id), (err2, rows2) => {
+						if (rows2 && rows2.length) {
+							Util.sendResult(res, 0, '查询成功', rows2[0].dep_set)
+						}
+					})
+				}
+			}
+			connection.release()
+		})
+	})
+})
+
 router.post('/login', (req, res, next) => {
     const body = req.body
     conn.getConnection(function(error, connection) {
@@ -375,7 +397,7 @@ router.post('/login', (req, res, next) => {
 						username,
 						token
 					}
-					res.cookie('token', token)
+					// res.cookie('token', token)
 					Util.sendResult(res, 0, '登录成功', data)
 				} else {
 					Util.sendResult(res, 1000, '密码错误')
@@ -394,7 +416,7 @@ router.post('/login', (req, res, next) => {
 								username,
 								token
 							}
-							res.cookie(token, token)
+							// res.cookie(token, genToken)
 							Util.sendResult(res, 0, '登录成功', data)
 						} else {
 							Util.sendResult(res, 1000, '密码错误')

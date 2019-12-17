@@ -11,6 +11,7 @@ const conn = require('../config/connection')
 const trans = require('../config/transaction')
 
 const staffRootDir = `${process.cwd()}/files/staff`
+const staffShareDir = `${process.cwd()}/files/share`
 
 router.get('/getDepartment', (req, res, next) => {
 	conn.getConnection((error, connection) => {
@@ -42,6 +43,15 @@ router.post('/addDepartment', (req, res, next) => {
 			// log error, whatever
 			return;
 		}
+
+		let par_dir = undefined			// 上级部门目录
+		let par_share_dir = undefined	// 上级部门共享目录
+		let par_dir_id = undefined		// 上级部门目录的目录id
+		let par_share_dir_id = undefined	// 上级部门共享目录的目录id
+		let dir_path = undefined			// 部门目录
+		let dir_path_id = undefined		// 部门目录的目录id
+		let dir_share_path = undefined	// 部门共享目录
+		let dir_share_path_id = undefined// 部门共享目录的目录id
 		// 创建事务列表
 		const tasks = [
 			// begin transaction
@@ -51,83 +61,109 @@ router.post('/addDepartment', (req, res, next) => {
 				});
 			},
 			function(callback) {
-				// 先查找部门上一级是否存在，返回上级目录或''
+				// 先查找部门上一级是否存在
 				if (obj.par_id) {
 					connection.query(depQuery.selectDepWithId(obj.par_id), (err, rows) => {
 						if (rows && rows.length && rows[0].dep_id) {
-							callback(err, rows[0].dep_dir)
-						} else {
-							callback(err, null)
+							par_dir = rows[0].dep_dir
+							par_share_dir = rows[0].share_dir
 						}
+						callback(err)
 					})
-				} else callback(null, null)
+				} else {
+					Util.sendResult(res, 1000, '上级部门不存在')
+					connection.release()
+				}
 			},
-			function(dir, callback) {
-				// 再查看当前目录是否存在，返回上级目录或''
-				const currentDir = `${dir}/${obj.dep_name}`
-				connection.query(depQuery.selectDepWithDir(currentDir), (err, rows) => {
+			function(callback) {
+				// 再查看当前部门是否存在，返回上级目录或''
+				dir_path = `${par_dir}/${obj.dep_name}`
+				connection.query(depQuery.selectDepWithDir(dir_path), (err, rows) => {
 					if (err) callback(err)
 					else if (rows && rows.length) {
-						connection.query('ROLLBACK', err => {
-							Util.sendResult(res, 1001, '同级下已存在同名部门')
-							connection.release()
-						});
+						Util.sendResult(res, 1001, '同级下已存在同名部门')
+						connection.release()
 					} else {
-						callback(err, dir)
+						callback(err)
 					}
 				})
 			},
-			function(dir, callback) {
-				obj.dep_dir = dir ? `${dir}/${obj.dep_name}` : `${staffRootDir}/${obj.dep_name}`
+			function(callback) {
+				obj.dep_dir = par_dir ? `${par_dir}/${obj.dep_name}` : `${staffRootDir}/${obj.dep_name}`
+				obj.share_dir = par_share_dir ? `${par_share_dir}/${obj.dep_name}共享` : `${staffShareDir}/${obj.dep_name}共享`
 				// 添加数据到部门表，返回上级目录
 				connection.query(depQuery.addDepartment(obj), err => {
-					callback(err, dir)
+					callback(err)
 				});
 			},
-			function(dir, callback) {
+			function(callback) {
 				// 根据上一步的返回的上级目录，查找是否存在于目录表，返回dir_id或null
-				connection.query(dirQuery.selectDirWithPath(dir), (err, rows) => {
+				connection.query(dirQuery.selectDirWithPath(par_dir), (err, rows) => {
 					if (rows && rows.length) {
-						callback(err, rows[0].dir_id, rows[0].dir_path)
+						par_dir_id = rows[0].dir_id
+						callback(err)
 					} else {
-						callback(err, null, null)
+						callback(err)
 					}
 				})
 			},
-			function(id, path, callback) {
-				const dep_dir = path ? `${path}/${obj.dep_name}` : `${staffRootDir}/${obj.dep_name}`
-				// 添加数据到目录表
+			function(callback) {
+				// 根据共享目录查找共享目录的id
+				connection.query(dirQuery.selectDirLikePath(par_share_dir), (err, rows) => {
+					if (rows && rows.length) {
+						par_share_dir_id = rows[0].dir_id
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 根据上一步的返回的上级目录，查找是否存在于目录表，返回dir_id或null
+				connection.query(dirQuery.selectDirWithPath(par_share_dir), (err, rows) => {
+					if (rows && rows.length) {
+						par_share_dir_id = rows[0].dir_id
+						callback(err)
+					} else {
+						callback(err)
+					}
+				})
+			},
+			function(callback) {
+				dir_path = par_dir ? `${par_dir}/${obj.dep_name}` : `${staffRootDir}/${obj.dep_name}`
+				// 添加部门目录数据到目录表
 				connection.query(dirQuery.addDir({
-					dir_pid: id || 0,
+					dir_pid: par_dir_id || 0,
 					dir_name: obj.dep_name,
-					path: dep_dir,
+					path: dir_path,
 					uniq: uuidv1(),
 					create_uid: uid
 				}), err => {
-					callback(err, dep_dir)
+					callback(err)
 				})
 			},
-			function(path, callback) {
+			function(callback) {
 				// 查询刚添加的目录的dir_id，返回dir_id和dep_dir
-				connection.query(dirQuery.selectDirWithPath(path), (err, rows) => {
-					callback(err, rows.length && rows[0].dir_id, path)
+				connection.query(dirQuery.selectDirWithPath(dir_path), (err, rows) => {
+					if (rows && rows.length) {
+						dir_path_id = rows[0].dir_id
+					}
+					callback(err)
 				})
 			},
-			function(dir_id, path, callback) {
-				const dep_dir = `${path}/${obj.dep_name}共享`
+			function(callback) {
+				dir_share_path = par_share_dir ? `${par_share_dir}/${obj.dep_name}共享` : `${staffShareDir}/${obj.dep_name}共享`
 				// 添加共享目录到目录表
 				connection.query(dirQuery.addDirShare({
-					dir_pid: dir_id,
-					dir_name: Util.getDirOrFileName(dep_dir),
-					path: dep_dir,
+					dir_pid: par_share_dir_id || 0,
+					dir_name: Util.getDirOrFileName(dir_share_path),
+					path: dir_share_path,
 					uniq: uuidv1(),
 					create_uid: uid
 				}), err => {
-					callback(err, path, dep_dir)
+					callback(err)
 				});
 			}
 		]
-		async.waterfall(tasks, function(err, path, dep_dir) {
+		async.waterfall(tasks, function(err) {
 			if (err) {
 				console.error(err)
 				connection.query('ROLLBACK', (err2) => {
@@ -136,8 +172,8 @@ router.post('/addDepartment', (req, res, next) => {
 			} else {
 				connection.query('COMMIT', () => {
 					// 创建部门和部门分享文件夹
-					Util.createStaffDir(path)
-					Util.createStaffDir(dep_dir)
+					Util.createStaffDir(dir_path)
+					Util.createStaffDir(dir_share_path)
 					Util.sendResult(res, 0, '创建成功')
 				});
 			}

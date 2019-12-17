@@ -8,7 +8,13 @@ module.exports = function (req, res, next) {
         next()
         return
     }
-    const token = req.cookies.token
+    // const token = req.cookies.token
+    let token = undefined
+    if (req.method === 'GET') {
+        token = req.query.token
+    } else if (req.method === 'POST') {
+        token = req.body.token
+    }
     if (!token) {
         Util.sendResult(res, 1003, 'token不存在')
     } else {

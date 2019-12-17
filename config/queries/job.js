@@ -29,13 +29,19 @@ function addJob(values) {
     const sql = `INSERT INTO lxm_user_job (
         job_name,
         job_dir,
+        share_dir,
         dep_id,
+        is_manager,
+        dep_set,
         create_uid,
         create_time
     ) VALUES (
         '${values.job_name}',
         '${values.job_dir}',
+        '${values.share_dir}',
         '${values.dep_id}',
+        '${values.is_manager}',
+        '${values.dep_set}',
         '${values.create_uid}',
         NOW()
     )`

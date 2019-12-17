@@ -44,6 +44,8 @@ router.post('/addJob', (req, res, next) => {
         let {
             dep_id,
             job_name,
+            is_manager,
+            dep_set,
             create_user,
             modify_userinfo,
             modify_password,
@@ -61,6 +63,8 @@ router.post('/addJob', (req, res, next) => {
             return
         }
         let dep_dir = undefined
+        let dep_share_dir = undefined
+        let dep_share_dir_id = undefined
         let job_dir = undefined
         let job_share_name = undefined
         let job_share_dir = undefined
@@ -80,9 +84,10 @@ router.post('/addJob', (req, res, next) => {
                 connection.query(depQuery.selectDepWithId(dep_id), (err, rows) => {
                     if (rows && rows.length) {
                         dep_dir = rows[0].dep_dir
+                        dep_share_dir = rows[0].share_dir
                         job_dir = `${dep_dir}/${job_name}`
                         job_share_name = `${job_name}共享`
-                        job_share_dir = `${job_dir}/${job_name}共享`
+                        job_share_dir = `${dep_share_dir}/${job_name}共享`
                     } else {
                         Util.sendResult(res, 1000, '部门ID错误')
                     }
@@ -105,6 +110,9 @@ router.post('/addJob', (req, res, next) => {
                 const values = {
                     job_name,
                     job_dir,
+                    is_manager: is_manager ? 1 : 0,
+                    dep_set: dep_set ? 1 : 0,
+                    share_dir: job_share_dir,
                     dep_id,
                     create_uid: uid
                 }
@@ -153,9 +161,18 @@ router.post('/addJob', (req, res, next) => {
                 })
             },
             function(callback) {
+                // 根据部门共享目录查询目录id
+                connection.query(dirQuery.selectDirWithPath(dep_share_dir), (err, rows) => {
+                    if (rows && rows.length) {
+                        dep_share_dir_id = rows[0].dir_id
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
                 // 新建岗位共享目录
                 const values = {
-                    dir_pid: job_dir_id,
+                    dir_pid: dep_share_dir_id,
                     dir_name: job_share_name,
                     path: job_share_dir,
                     uniq: uuidv1(),
