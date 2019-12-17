@@ -45,7 +45,9 @@ router.get('/getDirList', (req, res, next) => {
                     if (rows && rows.length) {
                         dir_arr = rows
                         let exceptItem = rows.find(item => item.dir_path === homefolder)
-                        exceptId = exceptItem.dir_id
+                        if (exceptItem) {
+                            exceptId = exceptItem.dir_id
+                        }
                     }
                     callback(err)
                 })

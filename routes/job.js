@@ -24,6 +24,9 @@ router.get('/getJobList', (req, res, next) => {
             if (rows && rows.length) {
                 Util.sendResult(res, 0, '查询成功', rows)
                 connection.release()
+            } else {
+                Util.sendResult(res, 0, '查询失败')
+                connection.release()
             }
         })
     })

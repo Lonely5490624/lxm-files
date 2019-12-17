@@ -323,6 +323,24 @@ router.post("/regUserStaff", async (req, res, next) => {
 	});
 });
 
+router.get('/getUserStaff', (req, res, next) => {
+	const job_id = req.query.job_id
+	const uid = req.user.uid
+	if (!job_id) {
+		Util.sendResult(res, 1003, '参数缺失')
+		return
+	}
+	conn.getConnection((error, connection) => {
+		if (error) return
+		connection.query(userQuery.selectUserStaffWithJobId(job_id), (err, rows) => {
+			if (rows) {
+				Util.sendResult(res, 0, '查询成功', rows)
+			}
+			connection.release()
+		})
+	})
+})
+
 router.post('/login', (req, res, next) => {
     const body = req.body
     conn.getConnection(function(error, connection) {

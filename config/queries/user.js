@@ -18,6 +18,11 @@ function selectUserStaffWithUsername(username) {
     return sql
 }
 
+function selectUserStaffWithJobId(job_id) {
+    const sql =`SELECT * FROM lxm_user_staff WHERE job_id = ${job_id} AND is_delete= 0`
+    return sql
+}
+
 function addUserCommon (values) {
     const sql = `INSERT INTO lxm_user_common (
         uid,
@@ -77,6 +82,7 @@ module.exports = {
     selectUserCommonWithUsername,
     selectUserStaffWithUserId,
     selectUserStaffWithUsername,
+    selectUserStaffWithJobId,
     addUserCommon,
     addUserStaff,
     updateStaffLoginTimeWithUid
