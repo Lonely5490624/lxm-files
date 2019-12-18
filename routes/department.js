@@ -109,7 +109,7 @@ router.post('/addDepartment', (req, res, next) => {
 			},
 			function(callback) {
 				// 根据共享目录查找共享目录的id
-				connection.query(dirQuery.selectDirLikePath(par_share_dir), (err, rows) => {
+				connection.query(dirQuery.selectDirShareWithPath(par_share_dir), (err, rows) => {
 					if (rows && rows.length) {
 						par_share_dir_id = rows[0].dir_id
 					}
@@ -217,6 +217,9 @@ router.post('/updateDepartment', (req, res, next) => {
 						old_name = rows[0].dep_name
 						old_path = rows[0].dep_dir
 						new_path = old_path.replace(old_name, body.new_name)
+						old_share_path = rows[0].share_dir
+						new_share_path = old_share_path.replace(old_name, `${body.new_name}`)
+						new_share_name = `${body.new_name}共享`
 					}
 					callback(err)
 				})
@@ -235,7 +238,7 @@ router.post('/updateDepartment', (req, res, next) => {
 				const childTasks = all_dep_path.map(item => {
 					const new_item_path = item.dep_dir.replace(old_path, new_path)
 					return function(callback) {
-						connection.query(depQuery.updateDepPathWithPath(item.dep_dir, new_item_path, uid), err => {
+						connection.query(depQuery.updateDepPathWithPath(item.dep_dir, new_item_path, new_share_path, uid), err => {
 							callback(err)
 						})
 					}
@@ -253,20 +256,18 @@ router.post('/updateDepartment', (req, res, next) => {
 					callback(err)
 				})
 			},
-			function (callback) {
-				// 查询该部门的共享目录
-				connection.query(dirQuery.selectShareDirWithPath(old_path), (err, rows) => {
-					if (rows && rows.length) {
-						old_share_path = rows[0].dir_path
-					}
-					callback(err)
-				})
-			},
+			// function (callback) {
+			// 	// 查询该部门的共享目录
+			// 	connection.query(dirQuery.selectShareDirWithPath(old_path), (err, rows) => {
+			// 		if (rows && rows.length) {
+			// 			old_share_path = rows[0].dir_path
+			// 		}
+			// 		callback(err)
+			// 	})
+			// },
 			function(callback) {
 				// 修改对应部门共享目录的名称和路径
-				new_share_name= `${body.new_name}共享`
-				new_share_path = `${new_path}/${new_share_name}`
-				connection.query(dirQuery.updateDirNameWithPath(old_share_path, new_share_name, new_share_path, uid), err => {
+				connection.query(dirQuery.updateShareDirNameWithPath(old_share_path, new_share_name, new_share_path, uid), err => {
 					callback(err)
 				})
 			},

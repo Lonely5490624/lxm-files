@@ -7,6 +7,11 @@ function selectDirWithId(dir_id) {
     return sql
 }
 
+function selectDirShareWithId(dir_id) {
+    const sql = `SELECT * FROM lxm_file_dir_share WHERE dir_id = ${dir_id} AND is_delete = 0`
+    return sql
+}
+
 function selectDirWithPid(dir_pid) {
     const sql = `SELECT * FROM lxm_file_dir WHERE dir_pid = ${dir_pid} AND is_delete = 0`
     return sql
@@ -19,6 +24,11 @@ function selectDirWithName(dir_name) {
 
 function selectDirWithPath(path) {
     const sql = `SELECT * FROM lxm_file_dir WHERE dir_path = '${path}' AND is_delete = 0`
+    return sql
+}
+
+function selectDirShareWithPath(path) {
+    const sql = `SELECT * FROM lxm_file_dir_share WHERE dir_path = '${path}' AND is_delete = 0`
     return sql
 }
 
@@ -59,13 +69,12 @@ function addDir(values) {
 }
 
 function addDirShare(values) {
-    const sql = `INSERT INTO lxm_file_dir (
+    const sql = `INSERT INTO lxm_file_dir_share (
         dir_pid,
         dir_name,
         dir_path,
         uniq,
         depth,
-        is_share,
         create_uid,
         create_time
     ) VALUES (
@@ -74,7 +83,6 @@ function addDirShare(values) {
         '${values.path}',
         '${values.uniq}',
         '${values.path.split('/').length - 1}',
-        1,
         '${values.create_uid}',
         NOW()
     )`
@@ -83,6 +91,11 @@ function addDirShare(values) {
 
 function updateDirNameWithPath(path, new_name, new_path, update_uid) {
     const sql = `UPDATE lxm_file_dir SET dir_name = '${new_name}', dir_path = '${new_path}', update_uid='${update_uid}', update_time = NOW() WHERE dir_path = '${path}'`
+    return sql
+}
+
+function updateShareDirNameWithPath(path, new_name, new_path, update_uid) {
+    const sql = `UPDATE lxm_file_dir_share SET dir_name = '${new_name}', dir_path = '${new_path}', update_uid='${update_uid}', update_time = NOW() WHERE dir_path = '${path}'`
     return sql
 }
 
@@ -103,15 +116,18 @@ function deleteDirWithId(dir_id, uid) {
 
 module.exports = {
     selectDirWithId,
+    selectDirShareWithId,
     selectDirWithPid,
     selectDirWithName,
     selectDirWithPath,
+    selectDirShareWithPath,
     selectDirLikePathWithoutSelf,
     selectDirLikePath,
     selectShareDirWithPath,
     addDir,
     addDirShare,
     updateDirNameWithPath,
+    updateShareDirNameWithPath,
     updateDirNameOnlyWithPath,
     updateDirPathWithPath,
     deleteDirWithId

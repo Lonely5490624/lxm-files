@@ -49,8 +49,8 @@ function updateDepNameWithId(dep_id, new_name, new_path, update_uid) {
     return sql
 }
 
-function updateDepPathWithPath(old_path, new_path, update_uid) {
-    const sql = `UPDATE lxm_user_department SET dep_dir = '${new_path}', update_uid = '${update_uid}', update_time = NOW() WHERE dep_dir = '${old_path}'`
+function updateDepPathWithPath(old_path, new_path, new_share_path, update_uid) {
+    const sql = `UPDATE lxm_user_department SET dep_dir = '${new_path}', share_dir = '${new_share_path}', update_uid = '${update_uid}', update_time = NOW() WHERE dep_dir = '${old_path}'`
     return sql
 }
 

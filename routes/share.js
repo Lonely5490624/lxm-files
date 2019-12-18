@@ -19,7 +19,7 @@ router.get('/getShareDir', (req, res, next) => {
 
     conn.getConnection((error, connection) => {
         if (error) return;
-        connection.query(`SELECT * FROM lxm_file_dir WHERE is_share = 1 AND is_delete = 0`, (err, rows) => {
+        connection.query(`SELECT * FROM lxm_file_dir_share WHERE is_delete = 0`, (err, rows) => {
             if (rows && rows.length) {
                 let data = Util.listToTree(rows, 'dir_id', 'dir_pid')
                 Util.sendResult(res, 0, '查询成功', data)
@@ -27,6 +27,311 @@ router.get('/getShareDir', (req, res, next) => {
             }
         })
     })
+})
+
+router.post('/uploadFileShare', (req, res, next) => {
+    const body = req.body
+    const uid = req.user.uid
+    if (!req.files) {
+        Util.sendResult(res, 1000, '请选择文件')
+        return
+    }
+    let dir_id = body.dir_id
+    if (!dir_id) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+        }
+        let dir_path = undefined
+        let failFiles = []
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 查询该用户的权限
+                connection.query(perQuery.selectPermissionWithUid(uid), (err, rows) => {
+                    if (rows && rows.length && rows[0].upload_file) {
+                    } else {
+                        Util.sendResult(res, 1004, '没有权限')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询目录是否存在
+                connection.query(dirQuery.selectDirShareWithId(dir_id), (err, rows) => {
+                    if (rows && rows.length) {
+                        dir_path = rows[0].dir_path
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 保存文件到服务器
+                const childTasks = Object.values(req.files).map((file, index) => {
+                    const path = `${dir_path}/${file.name}`
+                    return function(cb) {
+                        // 查询当前文件路径是否存在
+                        connection.query(fileQuery.selectFileShareWithPath(path), (err, rows) => {
+                            if (rows && rows.length) {
+                                failFiles.push(file.name)
+                                cb(null)
+                            } else {
+                                const values = {
+                                    dir_id,
+                                    file_name: file.name,
+                                    file_path: path,
+                                    type: 1,
+                                    ext: Util.getFileExt(file.name),
+                                    size: file.size,
+                                    uniq: uuidv1(),
+                                    create_uid: uid
+                                }
+                                // 保存文件到文件表
+                                connection.query(fileQuery.addFileShare(values), err2 => {
+                                    if (err2) {
+                                        cb(err2)
+                                    } else {
+                                        file.mv(path)
+                                        cb(null)
+                                    }
+                                })
+                            }
+                        })
+                    }
+                })
+                async.series(childTasks, err => {
+                    callback(err)
+                })
+            }
+		]
+		async.waterfall(tasks, function(err) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '上传失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+                    if (failFiles.length) {
+                        Util.sendResult(res, 0, '以下文件未上传成功', failFiles)
+                    } else {
+                        Util.sendResult(res, 0, '上传成功')
+                    }
+				});
+			}
+            connection.release()
+		});
+	});
+})
+
+router.post('/shareFile', (req, res, next) => {
+    const uid = req.user.uid
+    const body = req.body
+    const {
+        file_id
+    } = body
+    if (!file_id) {
+        Util.sendResult(res, 1000, '请选择文件')
+        return
+    }
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+        }
+        let fileInfo = undefined
+        let userInfo = undefined
+        let jobInfo = undefined
+        let depInfo = undefined
+        let sharePath = undefined
+        let share_dir_id = undefined
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 在文件表查询该文件的数据 
+                connection.query(fileQuery.selectFileWithFileId(file_id), (err, rows) => {
+                    if (rows && rows.length) {
+                        fileInfo = rows[0]
+                        console.log(2222, fileInfo)
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                const selectUser = function(callback, path) {
+                    // 通过目录找到用户/岗位/部门（递归）
+                    let pathArr = path.split('/')
+                    pathArr.pop()
+                    const newPath = pathArr.join('/')
+                    console.log(333, newPath)
+        
+                    const childTasks = [
+                        function(cb) {
+                            // 查找该目录所属的用户
+                            connection.query(`SELECT * FROM lxm_user_staff WHERE homefolder = '${newPath}' AND is_delete = 0`, (err, rows) => {
+                                if (rows && rows.length) {
+                                    userInfo = rows[0]
+                                }
+                                cb(err)
+                            })
+                        },
+                        function(cb) {
+                            // 查找该目录所属的岗位
+                            connection.query(`SELECT * FROM lxm_user_job WHERE job_dir = '${newPath}' AND is_delete = 0`, (err, rows) => {
+                                if (rows && rows.length) {
+                                    jobInfo = rows[0]
+                                }
+                                cb(err)
+                            })
+                        },
+                        function(cb) {
+                            // 查找该目录所属的部门
+                            connection.query(`SELECT * FROM lxm_user_department WHERE dep_dir = '${newPath}' AND is_delete = 0`, (err, rows) => {
+                                if (rows && rows.length) {
+                                    depInfo = rows[0]
+                                }
+                                cb(err)
+                            })
+                        }
+                    ]
+                    async.waterfall(childTasks, err => {
+                        if (!userInfo && !jobInfo && !depInfo && pathArr.length) {
+                            selectUser(callback, newPath)
+                        } else {
+                            callback(err)
+                        }
+                    })
+                }
+
+                selectUser(callback, fileInfo.file_path)
+            },
+            function(callback) {
+                /**
+                 * 如果是用户或岗位，找到岗位共享目录
+                 * 如果是部门则找到部门共享目录
+                 */
+                if (userInfo) {
+                    connection.query(`SELECT * FROM lxm_user_job WHERE job_id = ${userInfo.job_id}`, (err, rows) => {
+                        if (rows && rows.length) {
+                            sharePath = rows[0].share_dir
+                        }
+                        callback(err)
+                    })
+                } else if (jobInfo) {
+                    sharePath = jobInfo.share_dir
+                    callback(null)
+                } else if (depInfo) {
+                    sharePath = depInfo.share_dir
+                    callback(null)
+                }
+            },
+            function(callback) {
+                // 查询共享目录的dir_id
+                connection.query(`SELECT * FROM lxm_file_dir_share WHERE dir_path = '${sharePath}'`, (err, rows) => {
+                    if (rows && rows.length) {
+                        share_dir_id = rows[0].dir_id
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 将fileInfo修改后写入共享文件表
+                const values = {
+                    dir_id: share_dir_id,
+                    file_name: fileInfo.file_name,
+                    file_path: `${sharePath}/${fileInfo.file_name}`,
+                    type: fileInfo.type,
+                    ext: fileInfo.type,
+                    size: fileInfo.size,
+                    uniq: fileInfo.uniq,
+                    create_uid: uid
+                }
+                connection.query(fileQuery.addFileShare(values), err => {
+                    callback(err)
+                })
+            }
+		]
+		async.waterfall(tasks, function(err) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '共享失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '共享成功')
+				});
+			}
+            connection.release()
+		});
+	});
+})
+
+router.post('/cancelShareFile', (req, res, next) => {
+    const uid = req.user.uid
+    const body = req.body
+    const {
+        file_id
+    } = body
+    if (!file_id) {
+        Util.sendResult(res, 1000, '请选择文件')
+        return
+    }
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+        }
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 删除分享文件表里面的数据 
+                connection.query(`DELETE FROM lxm_file_file_share WHERE file_id=${file_id}`, (err, rows) =>{
+                    callback(err)
+                })
+            }
+		]
+		async.waterfall(tasks, function(err) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '取消共享失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '取消共享成功')
+				});
+			}
+            connection.release()
+		});
+	});
 })
 
 // router.get('/getShareDir', (req, res, next) => {

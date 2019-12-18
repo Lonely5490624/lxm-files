@@ -53,8 +53,8 @@ function updateJobNameWithId(dep_id, new_name, new_path, update_uid, update_time
     return sql
 }
 
-function updateJobPathWithPath(old_path, new_path, update_uid) {
-    const sql = `UPDATE lxm_user_job SET job_dir = '${new_path}', update_uid = '${update_uid}', update_time = NOW() WHERE job_dir = '${old_path}'`
+function updateJobPathWithPath(old_path, new_path, new_share_path, update_uid) {
+    const sql = `UPDATE lxm_user_job SET job_dir = '${new_path}', share_dir='${new_share_path}', update_uid = '${update_uid}', update_time = NOW() WHERE job_dir = '${old_path}'`
     return sql
 }
 

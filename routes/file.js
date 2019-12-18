@@ -54,6 +54,50 @@ router.get('/getFileWithDirId', (req, res, next) => {
 	});
 })
 
+router.get('/getShareFileWithDirId', (req, res, next) => {
+    const dir_id = req.query.dir_id
+    const uid = req.user.uid
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+        }
+        let result_arr = undefined
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 查询目录下面的文件
+                connection.query(fileQuery.selectShareFileWithDirId(dir_id), (err, rows) => {
+                    if (rows && rows.length) {
+                        result_arr = rows
+                    }
+                    callback(err)
+                })
+            }
+		]
+		async.waterfall(tasks, function(err) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '查询失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '查询成功', result_arr)
+                })
+			}
+            connection.release()
+		});
+	});
+})
+
 router.get('/fileDownload', (req, res, next) => {
     const file_id = req.query.file_id
     const uid = req.user.uid

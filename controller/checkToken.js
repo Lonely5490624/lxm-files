@@ -16,16 +16,16 @@ module.exports = function (req, res, next) {
         token = req.body.token
     }
     if (!token) {
-        Util.sendResult(res, 1003, 'token不存在')
+        Util.sendResult(res, 1001, 'token不存在')
     } else {
         jwt.verify(token, 'lexuemao_2019_jwt', (err, decoded) => {
             if (err) {
                 if (err.message === 'invalid signature') {
                     res.clearCookie('token')
-                    Util.sendResult(res, 1003, 'token验证失败，请重新登录')
+                    Util.sendResult(res, 1001, 'token验证失败，请重新登录')
                 } else if (err.message === 'jwt expired') {
                     res.clearCookie('token')
-                    Util.sendResult(res, 1003, 'token过期，请重新登录')
+                    Util.sendResult(res, 1001, 'token过期，请重新登录')
                 }
             } else {
               // 将携带的信息赋给req.user

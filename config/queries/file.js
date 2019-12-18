@@ -3,8 +3,18 @@ function selectFileWithPath(path) {
     return sql
 }
 
+function selectFileShareWithPath(path) {
+    const sql = `SELECT * FROM lxm_file_file_share WHERE file_path = '${path}' AND is_delete = 0`
+    return sql
+}
+
 function selectFileWithDirId(dir_id) {
     const sql = `SELECT * FROM lxm_file_file WHERE dir_id = ${dir_id} AND is_delete = 0`
+    return sql
+}
+
+function selectShareFileWithDirId(dir_id) {
+    const sql = `SELECT * FROM lxm_file_file_share WHERE dir_id = ${dir_id} AND is_delete = 0`
     return sql
 }
 
@@ -20,6 +30,31 @@ function selectFileLikePath(file_path) {
 
 function addFile(values) {
     const sql = `INSERT INTO lxm_file_file (
+        dir_id,
+        file_name,
+        file_path,
+        type,
+        ext,
+        size,
+        uniq,
+        create_uid,
+        create_time
+    ) VALUES (
+        ${values.dir_id},
+        '${values.file_name}',
+        '${values.file_path}',
+        ${values.type},
+        '${values.ext}',
+        '${values.size}',
+        '${values.uniq}',
+        '${values.create_uid}',
+        NOW()
+    )`
+    return sql
+}
+
+function addFileShare(values) {
+    const sql = `INSERT INTO lxm_file_file_share (
         dir_id,
         file_name,
         file_path,
@@ -60,10 +95,13 @@ function deleteFileWithFileId(file_id, uid) {
 
 module.exports = {
     selectFileWithPath,
+    selectFileShareWithPath,
     selectFileWithDirId,
     selectFileWithFileId,
+    selectShareFileWithDirId,
     selectFileLikePath,
     addFile,
+    addFileShare,
     updateFileName,
     updateFilePath,
     deleteFileWithFileId
