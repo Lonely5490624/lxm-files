@@ -19,122 +19,14 @@ router.get('/getShareDir', (req, res, next) => {
 
     conn.getConnection((error, connection) => {
         if (error) return;
-        connection.query(`SELECT * FROM lxm_file_dir_share WHERE is_delete = 0`, (err, rows) => {
-            if (rows && rows.length) {
+        connection.query(`SELECT * FROM lxm_file_dir WHERE is_share = 1 AND is_delete = 0`, (err, rows) => {
+            if (rows) {
                 let data = Util.listToTree(rows, 'dir_id', 'dir_pid')
-                Util.sendResult(res, 0, '查询成功', data)
+                Util.sendResult(res, 0, '查询成功', data || [])
                 connection.release()
             }
         })
     })
-})
-
-router.post('/uploadFileShare', (req, res, next) => {
-    const body = req.body
-    const uid = req.user.uid
-    if (!req.files) {
-        Util.sendResult(res, 1000, '请选择文件')
-        return
-    }
-    let dir_id = body.dir_id
-    if (!dir_id) {
-        Util.sendResult(res, 1003, '参数缺失')
-        return
-    }
-    conn.getConnection(function(error, connection) {
-		if (error) {
-			// log error, whatever
-			return;
-        }
-        let dir_path = undefined
-        let failFiles = []
-        
-		// 创建事务列表
-		const tasks = [
-			// begin transaction
-			function(callback) {
-				connection.query('BEGIN', err => {
-					callback(err)
-				});
-            },
-            function(callback) {
-                // 查询该用户的权限
-                connection.query(perQuery.selectPermissionWithUid(uid), (err, rows) => {
-                    if (rows && rows.length && rows[0].upload_file) {
-                    } else {
-                        Util.sendResult(res, 1004, '没有权限')
-                        connection.release()
-                        return
-                    }
-                    callback(err)
-                })
-            },
-            function(callback) {
-                // 查询目录是否存在
-                connection.query(dirQuery.selectDirShareWithId(dir_id), (err, rows) => {
-                    if (rows && rows.length) {
-                        dir_path = rows[0].dir_path
-                    }
-                    callback(err)
-                })
-            },
-            function(callback) {
-                // 保存文件到服务器
-                const childTasks = Object.values(req.files).map((file, index) => {
-                    const path = `${dir_path}/${file.name}`
-                    return function(cb) {
-                        // 查询当前文件路径是否存在
-                        connection.query(fileQuery.selectFileShareWithPath(path), (err, rows) => {
-                            if (rows && rows.length) {
-                                failFiles.push(file.name)
-                                cb(null)
-                            } else {
-                                const values = {
-                                    dir_id,
-                                    file_name: file.name,
-                                    file_path: path,
-                                    type: 1,
-                                    ext: Util.getFileExt(file.name),
-                                    size: file.size,
-                                    uniq: uuidv1(),
-                                    create_uid: uid
-                                }
-                                // 保存文件到文件表
-                                connection.query(fileQuery.addFileShare(values), err2 => {
-                                    if (err2) {
-                                        cb(err2)
-                                    } else {
-                                        file.mv(path)
-                                        cb(null)
-                                    }
-                                })
-                            }
-                        })
-                    }
-                })
-                async.series(childTasks, err => {
-                    callback(err)
-                })
-            }
-		]
-		async.waterfall(tasks, function(err) {
-			if (err) {
-				console.error(err)
-				connection.query('ROLLBACK', () => {
-					Util.sendResult(res, 1000, '上传失败')
-				});
-			} else {
-				connection.query('COMMIT', () => {
-                    if (failFiles.length) {
-                        Util.sendResult(res, 0, '以下文件未上传成功', failFiles)
-                    } else {
-                        Util.sendResult(res, 0, '上传成功')
-                    }
-				});
-			}
-            connection.release()
-		});
-	});
 })
 
 router.post('/shareFile', (req, res, next) => {
@@ -153,11 +45,7 @@ router.post('/shareFile', (req, res, next) => {
 			return;
         }
         let fileInfo = undefined
-        let userInfo = undefined
-        let jobInfo = undefined
-        let depInfo = undefined
-        let sharePath = undefined
-        let share_dir_id = undefined
+        let dirIdArr = []
         
 		// 创建事务列表
 		const tasks = [
@@ -168,105 +56,51 @@ router.post('/shareFile', (req, res, next) => {
 				});
             },
             function(callback) {
-                // 在文件表查询该文件的数据 
-                connection.query(fileQuery.selectFileWithFileId(file_id), (err, rows) => {
+                // 查询该文件信息
+                connection.query(`SELECT * FROM lxm_file_file WHERE file_id = ${file_id}`, (err, rows) =>{
                     if (rows && rows.length) {
                         fileInfo = rows[0]
-                        console.log(2222, fileInfo)
+                    } else {
+                        Util.sendResult(res, 1000, '未找到该文件')
+                        connection.release()
                     }
                     callback(err)
                 })
             },
             function(callback) {
-                const selectUser = function(callback, path) {
-                    // 通过目录找到用户/岗位/部门（递归）
-                    let pathArr = path.split('/')
-                    pathArr.pop()
-                    const newPath = pathArr.join('/')
-                    console.log(333, newPath)
-        
-                    const childTasks = [
-                        function(cb) {
-                            // 查找该目录所属的用户
-                            connection.query(`SELECT * FROM lxm_user_staff WHERE homefolder = '${newPath}' AND is_delete = 0`, (err, rows) => {
-                                if (rows && rows.length) {
-                                    userInfo = rows[0]
-                                }
-                                cb(err)
-                            })
-                        },
-                        function(cb) {
-                            // 查找该目录所属的岗位
-                            connection.query(`SELECT * FROM lxm_user_job WHERE job_dir = '${newPath}' AND is_delete = 0`, (err, rows) => {
-                                if (rows && rows.length) {
-                                    jobInfo = rows[0]
-                                }
-                                cb(err)
-                            })
-                        },
-                        function(cb) {
-                            // 查找该目录所属的部门
-                            connection.query(`SELECT * FROM lxm_user_department WHERE dep_dir = '${newPath}' AND is_delete = 0`, (err, rows) => {
-                                if (rows && rows.length) {
-                                    depInfo = rows[0]
-                                }
-                                cb(err)
-                            })
-                        }
-                    ]
-                    async.waterfall(childTasks, err => {
-                        if (!userInfo && !jobInfo && !depInfo && pathArr.length) {
-                            selectUser(callback, newPath)
+                // 修改文件为共享文件
+                connection.query(`UPDATE lxm_file_file SET is_share = 1, share_uid = '${uid}' WHERE file_id=${file_id}`, err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查找该文件被包含的目录
+                const findParDir = function(callback, dir_id) {
+                    connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id = ${dir_id}`, (err, rows) => {
+                        if (rows && rows.length) {
+                            dirIdArr.push(rows[0].dir_id)
+                            if (rows[0].dir_pid !== 0) {
+                                findParDir(callback, rows[0].dir_pid)
+                            } else {
+                                callback(err)
+                            }
                         } else {
                             callback(err)
                         }
                     })
                 }
-
-                selectUser(callback, fileInfo.file_path)
+                findParDir(callback, fileInfo.dir_id)
             },
             function(callback) {
-                /**
-                 * 如果是用户或岗位，找到岗位共享目录
-                 * 如果是部门则找到部门共享目录
-                 */
-                if (userInfo) {
-                    connection.query(`SELECT * FROM lxm_user_job WHERE job_id = ${userInfo.job_id}`, (err, rows) => {
-                        if (rows && rows.length) {
-                            sharePath = rows[0].share_dir
-                        }
-                        callback(err)
-                    })
-                } else if (jobInfo) {
-                    sharePath = jobInfo.share_dir
-                    callback(null)
-                } else if (depInfo) {
-                    sharePath = depInfo.share_dir
-                    callback(null)
-                }
-            },
-            function(callback) {
-                // 查询共享目录的dir_id
-                connection.query(`SELECT * FROM lxm_file_dir_share WHERE dir_path = '${sharePath}'`, (err, rows) => {
-                    if (rows && rows.length) {
-                        share_dir_id = rows[0].dir_id
+                // 遍历所有目录，并将其改为isShare = 1
+                const childTasks = dirIdArr.map(item => {
+                    return function(cb) {
+                        connection.query(`UPDATE lxm_file_dir SET is_share = 1  WHERE dir_id = ${item}`, err => {
+                            cb(err)
+                        })
                     }
-                    callback(err)
                 })
-            },
-            function(callback) {
-                // 将fileInfo修改后写入共享文件表
-                const values = {
-                    dir_id: share_dir_id,
-                    file_name: fileInfo.file_name,
-                    file_path: `${sharePath}/${fileInfo.file_name}`,
-                    type: fileInfo.type,
-                    ext: fileInfo.type,
-                    size: fileInfo.size,
-                    uniq: fileInfo.uniq,
-                    create_uid: uid
-                }
-                connection.query(fileQuery.addFileShare(values), err => {
+                async.waterfall(childTasks, err => {
                     callback(err)
                 })
             }
@@ -302,6 +136,7 @@ router.post('/cancelShareFile', (req, res, next) => {
 			// log error, whatever
 			return;
         }
+        let dir_id = undefined
         
 		// 创建事务列表
 		const tasks = [
@@ -312,10 +147,66 @@ router.post('/cancelShareFile', (req, res, next) => {
 				});
             },
             function(callback) {
-                // 删除分享文件表里面的数据 
-                connection.query(`DELETE FROM lxm_file_file_share WHERE file_id=${file_id}`, (err, rows) =>{
+                // 查询该用户是否有该文件的取消共享权限
+                connection.query(`SELECT * FROM lxm_file_file WHERE file_id = ${file_id} AND share_uid = '${uid}' AND is_delete = 0`, (err, rows) => {
+                    if (rows) {
+                        if (rows.length) {
+                            dir_id = rows[0].dir_id
+                        } else {
+                            Util.sendResult(res, 1004, '没有权限')
+                            connection.release()
+                            return
+                        }
+                    }
                     callback(err)
                 })
+            },
+            function(callback) {
+                // 取消共享文件
+                connection.query(`UPDATE lxm_file_file SET is_share = 0 WHERE file_id = '${file_id}'`, err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                /**
+                 * 查询上级目录下的所有文件是否被还有文件被共享
+                 * 若没有，则取消当前目录的共享，继续向上级找
+                 * 若还有，则不取消当前目录的共享
+                 */
+                const cancelDirShare = function(cb, dir_id) {
+                    connection.query(`SELECT * FROM lxm_file_file WHERE is_share = 1 AND dir_id = ${dir_id} AND is_delete = 0`, (err, rows) => {
+                        connection.query(`SELECT * FROM lxm_file_dir WHERE is_share = 1 AND dir_pid = ${dir_id} AND is_delete = 0`, (err4, rows4) => {
+                            if (rows) {
+                                if (rows4) {
+                                    if (rows.length || rows4.length) {
+                                        // 若还有，则不取消当前目录的共享，直接进行下一步task
+                                        cb(null)
+                                    } else {
+                                        // 若没有，则在目录表取消当前目录的共享，并递归查找更上一级
+                                        connection.query(`UPDATE lxm_file_dir SET is_share = 0 WHERE dir_id = ${dir_id}`, err2 => {
+                                            if(err2) cb(err2)
+                                            else {
+                                                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id = ${dir_id}`, (err3, rows2) => {
+                                                    if (err3) cb(err2)
+                                                    else if (rows2 && rows2.length && rows2[0].dir_id !== 0) {
+                                                        cancelDirShare(cb, rows2[0].dir_pid)
+                                                    } else {
+                                                        cb(err3)
+                                                    }
+                                                })
+                                            }
+                                        })
+                                    }
+                                } else {
+                                    cb(err4)
+                                }
+                            } else {
+                                cb(err)
+                            }
+                        })
+                    })
+                }
+                cancelDirShare(callback, dir_id)
             }
 		]
 		async.waterfall(tasks, function(err) {
@@ -333,917 +224,5 @@ router.post('/cancelShareFile', (req, res, next) => {
 		});
 	});
 })
-
-// router.get('/getShareDir', (req, res, next) => {
-//     const uid = req.user.uid
-
-//     conn.getConnection(function(error, connection) {
-// 		if (error) {
-// 			// log error, whatever
-// 			return;
-//         }
-//         let dep_id = undefined
-//         let job_id = undefined
-//         let dir_id_arr = []
-//         let dir_arr = []
-//         let result_arr = []
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询该用户的部门、岗位ID
-//                 connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dep_id = rows[0].dep_id
-//                         job_id = rows[0].job_id
-//                     } else {
-//                         Util.sendResult(res, 1000, '当前用户不存在')
-//                         connection.release()
-//                         return
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询该用户的部门被共享的目录
-//                 connection.query(shareQuery.selectShareDirWithDep(dep_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr.push(...rows)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询该用户的岗位被共享的目录
-//                 connection.query(shareQuery.selectShareDirWithJob(job_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr.push(...rows)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询该用户被共享的目录
-//                 connection.query(shareQuery.selectShareDirWithUser(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr.push(...rows)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 通过被共享的目录id，查找出其他目录信息
-//                 if (dir_id_arr && dir_id_arr.length) {
-//                     let reduced_arr = Util.reduceJsonArray(dir_id_arr, 'dir_id')
-//                     let childTasks = reduced_arr.map(item => {
-//                         return function(cb) {
-//                             connection.query(dirQuery.selectDirWithId(item.dir_id), (err, rows) => {
-//                                 if (rows && rows.length) {
-//                                     let data = rows[0]
-//                                     data.perms_upload = item.perms_upload
-//                                     data.perms_download = item.perms_download
-//                                     data.perms_update = item.perms_update
-//                                     data.perms_delete = item.perms_delete
-//                                     dir_arr.push(data)
-//                                 }
-//                                 cb(err)
-//                             })
-//                         }
-//                     })
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             },
-//             function(callback) {
-//                 // 查询被共享目录下的所有目录
-//                 if (dir_arr.length) {
-//                     let childTasks = dir_arr.map(item => {
-//                         let path = item.dir_path
-//                         return function(cb) {
-//                             connection.query(dirQuery.selectDirLikePath(path), (err, rows) => {
-//                                 result_arr.push(...rows)
-//                                 cb(err)
-//                             })
-//                         }
-//                     })
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '查询失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					Util.sendResult(res, 0, '查询成功', Util.listToTree(result_arr, 'dir_id', 'dir_pid'))
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// router.get('/getShareFile', (req, res, next) => {
-//     const uid = req.user.uid
-
-//     conn.getConnection(function(error, connection) {
-// 		if (error) {
-// 			// log error, whatever
-// 			return;
-//         }
-//         let dep_id = undefined
-//         let job_id = undefined
-//         let dir_id_arr = []
-//         let file_arr = []
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询该用户的部门、岗位ID
-//                 connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dep_id = rows[0].dep_id
-//                         job_id = rows[0].job_id
-//                     } else {
-//                         Util.sendResult(res, 1000, '当前用户不存在')
-//                         connection.release()
-//                         return
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询该用户的部门被共享的文件
-//                 connection.query(shareQuery.selectShareDirWithDep(dep_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr.push(...rows)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询该用户的岗位被共享的文件
-//                 connection.query(shareQuery.selectShareDirWithJob(job_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr.push(...rows)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询该用户被共享的文件
-//                 connection.query(shareQuery.selectShareDirWithUser(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr.push(...rows)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 通过被共享的文件id，查找出其他文件信息
-//                 let reduced_arr = Util.reduceJsonArray(dir_id_arr, 'file_id')
-//                 let childTasks = reduced_arr.map(item => {
-//                     return function(cb) {
-//                         connection.query(fileQuery.selectFileWithFileId(item.file_id), (err, rows) => {
-//                             if (rows && rows.length) {
-//                                 let data = rows[0]
-//                                 data.perms_upload = item.perms_upload
-//                                 data.perms_download = item.perms_download
-//                                 data.perms_update = item.perms_update
-//                                 data.perms_delete = item.perms_delete
-//                                 file_arr.push(data)
-//                             }
-//                             cb(err)
-//                         })
-//                     }
-//                 })
-//                 async.series(childTasks, err => {
-//                     callback(err)
-//                 })
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '查询失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					Util.sendResult(res, 0, '查询成功', file_arr)
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// router.get('/getShareDirFromMe', (req, res, next) => {
-//     const uid = req.user.uid
-
-//     conn.getConnection(function(error, connection) {
-// 		if (error) {
-// 			// log error, whatever
-// 			return;
-//         }
-//         let dir_id_arr = undefined
-//         let dir_arr = []
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询我共享的目录
-//                 connection.query(shareQuery.selectShareDirFromUid(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dir_id_arr = rows.filter(item => item.dir_id)
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 通过被共享的目录id，查找出其他目录信息
-//                 if (dir_id_arr && dir_id_arr.length) {
-//                     let reduced_arr = Util.reduceJsonArray(dir_id_arr, 'dir_id')
-//                     let childTasks = reduced_arr.map(item => {
-//                         return function(cb) {
-//                             connection.query(dirQuery.selectDirWithId(item.dir_id), (err, rows) => {
-//                                 if (rows && rows.length) {
-//                                     let data = rows[0]
-//                                     data.perms_upload = item.perms_upload
-//                                     data.perms_download = item.perms_download
-//                                     data.perms_update = item.perms_update
-//                                     data.perms_delete = item.perms_delete
-//                                     dir_arr.push(data)
-//                                 }
-//                                 cb(err)
-//                             })
-//                         }
-//                     })
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '查询失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					Util.sendResult(res, 0, '查询成功', dir_arr)
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// router.get('/getShareFileFromMe', (req, res, next) => {
-//     const uid = req.user.uid
-
-//     conn.getConnection(function(error, connection) {
-// 		if (error) {
-// 			// log error, whatever
-// 			return;
-//         }
-//         let share_dir = undefined
-//         let file_arr = []
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询我共享的文件
-//                 connection.query(shareQuery.selectShareDirFromUid(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         share_dir = rows
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 通过被共享的文件id，查找出其他文件信息
-//                 let reduced_arr = Util.reduceJsonArray(dir_id_arr, 'file_id')
-//                 let childTasks = reduced_arr.map(item => {
-//                     return function(cb) {
-//                         connection.query(fileQuery.selectFileWithFileId(item.file_id), (err, rows) => {
-//                             if (rows && rows.length) {
-//                                 let data = rows[0]
-//                                 data.perms_upload = item.perms_upload
-//                                 data.perms_download = item.perms_download
-//                                 data.perms_update = item.perms_update
-//                                 data.perms_delete = item.perms_delete
-//                                 file_arr.push(data)
-//                             }
-//                             cb(err)
-//                         })
-//                     }
-//                 })
-//                 async.series(childTasks, err => {
-//                     callback(err)
-//                 })
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '查询失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					Util.sendResult(res, 0, '查询成功', file_arr)
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// router.post('/shareDir', (req, res, next) => {
-//     const body = req.body
-//     const uid = req.user.uid
-//     const {
-//         dir_id,
-//         with_uids,
-//         with_job_ids,
-//         with_dep_ids,
-//         perms_upload,
-//         perms_download,
-//         perms_update,
-//         perms_delete
-//     } = body
-
-//     if (!dir_id) {
-//         Util.sendResult(res, 1003, '参数缺失')
-//         return
-//     }
-
-//     conn.getConnection(function(error, connection) {
-// 		if (error) {
-// 			// log error, whatever
-// 			return;
-//         }
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询目录是否存在
-//                 connection.query(dirQuery.selectDirWithId(dir_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                     } else {
-//                         Util.sendResult(res, 1000, '当前目录不存在')
-//                         connection.release()
-//                         return
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 若有部门id，则以部门id添加到分享表
-//                 if (with_dep_ids && with_dep_ids.length) {
-//                     let with_dep_id_arr = with_dep_ids.split(',')
-//                     let childTasks = with_dep_id_arr.map(item => {
-//                         let values = {
-//                             uid,
-//                             dir_id,
-//                             with_dep_id: item,
-//                             perms_upload,
-//                             perms_download,
-//                             perms_update,
-//                             perms_delete
-//                         }
-//                         return function(cb) {
-//                             connection.query(shareQuery.addShareDirWithDep(values), err => {
-//                                 cb(err)
-//                             })
-//                         }
-//                     });
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             },
-//             function(callback) {
-//                 // 若有岗位ID，以岗位ID添加到分享表
-//                 if (with_job_ids && with_job_ids.length) {
-//                     let with_job_id_arr = with_job_ids.split(',')
-//                     let childTasks = with_job_id_arr.map(item => {
-//                         let values = {
-//                             uid,
-//                             dir_id,
-//                             with_job_id: item,
-//                             perms_upload,
-//                             perms_download,
-//                             perms_update,
-//                             perms_delete
-//                         }
-//                         return function(cb) {
-//                             connection.query(shareQuery.addShareDirWithJob(values), err => {
-//                                 cb(err)
-//                             })
-//                         }
-//                     });
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             },
-//             function(callback) {
-//                 // 若有用户ID，以用户ID添加到分享表
-//                 if (with_uids && with_uids.length) {
-//                     let with_uid_arr = with_uids.split(',')
-//                     let childTasks = with_uid_arr.map(item => {
-//                         let values = {
-//                             uid,
-//                             dir_id,
-//                             with_uid: item,
-//                             perms_upload,
-//                             perms_download,
-//                             perms_update,
-//                             perms_delete
-//                         }
-//                         return function(cb) {
-//                             connection.query(shareQuery.addShareDirWithUser(values), err => {
-//                                 cb(err)
-//                             })
-//                         }
-//                     });
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '共享失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					Util.sendResult(res, 0, '共享成功')
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// router.post('/shareFile', (req, res, next) => {
-//     const body = req.body
-//     const uid = req.user.uid
-//     const {
-//         file_id,
-//         with_uids,
-//         with_job_ids,
-//         with_dep_ids,
-//         perms_upload,
-//         perms_download,
-//         perms_update,
-//         perms_delete
-//     } = body
-
-//     if (!file_id) {
-//         Util.sendResult(res, 1003, '参数缺失')
-//         return
-//     }
-
-//     conn.getConnection(function(error, connection) {
-// 		if (error) {
-// 			// log error, whatever
-// 			return;
-//         }
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询目录是否存在
-//                 connection.query(fileQuery.selectFileWithFileId(file_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                     } else {
-//                         Util.sendResult(res, 1000, '当前文件不存在')
-//                         connection.release()
-//                         return
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 若有部门id，则以部门id添加到分享表
-//                 if (with_dep_ids && with_dep_ids.length) {
-//                     let with_dep_id_arr = with_dep_ids.split(',')
-//                     let childTasks = with_dep_id_arr.map(item => {
-//                         let values = {
-//                             uid,
-//                             file_id,
-//                             with_dep_id: item,
-//                             perms_upload,
-//                             perms_download,
-//                             perms_update,
-//                             perms_delete
-//                         }
-//                         return function(cb) {
-//                             connection.query(shareQuery.addShareFileWithDep(values), err => {
-//                                 cb(err)
-//                             })
-//                         }
-//                     });
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             },
-//             function(callback) {
-//                 // 若有岗位ID，以岗位ID添加到分享表
-//                 if (with_job_ids && with_job_ids.length) {
-//                     let with_job_id_arr = with_job_ids.split(',')
-//                     let childTasks = with_job_id_arr.map(item => {
-//                         let values = {
-//                             uid,
-//                             file_id,
-//                             with_job_id: item,
-//                             perms_upload,
-//                             perms_download,
-//                             perms_update,
-//                             perms_delete
-//                         }
-//                         return function(cb) {
-//                             connection.query(shareQuery.addShareFileWithJob(values), err => {
-//                                 cb(err)
-//                             })
-//                         }
-//                     });
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             },
-//             function(callback) {
-//                 // 若有用户ID，以用户ID添加到分享表
-//                 if (with_uids && with_uids.length) {
-//                     let with_uid_arr = with_uids.split(',')
-//                     let childTasks = with_uid_arr.map(item => {
-//                         let values = {
-//                             uid,
-//                             file_id,
-//                             with_uid: item,
-//                             perms_upload,
-//                             perms_download,
-//                             perms_update,
-//                             perms_delete
-//                         }
-//                         return function(cb) {
-//                             connection.query(shareQuery.addShareFileWithUser(values), err => {
-//                                 cb(err)
-//                             })
-//                         }
-//                     });
-//                     async.series(childTasks, err => {
-//                         callback(err)
-//                     })
-//                 } else {
-//                     callback(null)
-//                 }
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '共享失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					Util.sendResult(res, 0, '共享成功')
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// /**
-//  * @description 在共享目录中上传，需要提供以下参数
-//  * @param {Number} root_id 共享目录的根id，即共享给我的那个目录id，需要使用这个id来确定权限
-//  * @param {Number} dir_id 需要上传目录的id
-//  * @param {Binary} file 需要上传的文件
-//  */
-// router.post('/uploadFileForShare', (req, res, next) => {
-//     const body = req.body
-//     const uid = req.user.uid
-//     let {
-//         root_id,
-//         dir_id
-//     } = body
-//     if (!req.files) {
-//         Util.sendResult(res, 1000, '请选择文件')
-//         return
-//     }
-//     if (!root_id || !dir_id) {
-//         Util.sendResult(res, 1003, '参数缺失')
-//         return
-//     }
-//     conn.getConnection(function(error, connection) {
-//         if (error) return
-//         let job_id = undefined
-//         let dep_id = undefined
-//         let dir_path = undefined
-//         let cur_dir_path = undefined
-//         let failFiles = []
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查询用户的job_id和dep_id
-//                 connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         job_id = rows[0].job_id
-//                         dep_id = rows[0].dep_id
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 let upload_file = false
-//                 let childTasks = [
-//                     function(cb) {
-//                         // 查询部门是否有这个root_id目录上传文件的权限
-//                         connection.query(shareQuery.selectShareDirWithDirAndDep(root_id, dep_id), (err, rows) => {
-//                             if (rows && rows.length && rows[0].perms_upload) {
-//                                 upload_file = true
-//                             }
-//                             cb(err)
-//                         })
-//                     },
-//                     function(cb) {
-//                         // 查询岗位是否有这个root_id目录上传文件的权限
-//                         connection.query(shareQuery.selectShareDirWithDirAndJob(root_id, job_id), (err, rows) => {
-//                             if (rows && rows.length && rows[0].perms_upload) {
-//                                 upload_file = true
-//                             }
-//                             cb(err)
-//                         })
-//                     },
-//                     function(cb) {
-//                         // 查询用户是否有这个root_id目录上传文件的权限
-//                         connection.query(shareQuery.selectShareDirWithDirAndUser(root_id, uid), (err, rows) => {
-//                             if (rows && rows.length && rows[0].perms_upload) {
-//                                 upload_file = true
-//                             }
-//                             cb(err)
-//                         })
-//                     }
-//                 ]
-//                 async.series(childTasks, err => {
-//                     if (upload_file) {
-//                         callback(err)
-//                     } else {
-//                         Util.sendResult(res, 1004, '没有权限')
-//                         connection.release()
-//                         return
-//                     }
-//                 })
-//             },
-//             function(callback) {
-//                 // 查询当前目录是否存在
-//                 connection.query(dirQuery.selectDirWithId(dir_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         cur_dir_path = rows[0].dir_path
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 保存文件到服务器
-//                 const childTasks = Object.values(req.files).map((file, index) => {
-//                     const path = `${cur_dir_path}/${file.name}`
-//                     return function(cb) {
-//                         // 查询当前文件路径是否存在
-//                         connection.query(fileQuery.selectFileWithPath(path), (err, rows) => {
-//                             if (rows && rows.length) {
-//                                 failFiles.push(file.name)
-//                                 cb(null)
-//                             } else {
-//                                 const values = {
-//                                     dir_id,
-//                                     file_name: file.name,
-//                                     file_path: path,
-//                                     type: 1,
-//                                     ext: Util.getFileExt(file.name),
-//                                     size: file.size,
-//                                     uniq: uuidv1(),
-//                                     create_uid: uid
-//                                 }
-//                                 // 保存文件到文件表
-//                                 connection.query(fileQuery.addFile(values), err2 => {
-//                                     if (err2) {
-//                                         cb(err2)
-//                                     } else {
-//                                         file.mv(path)
-//                                         cb(null)
-//                                     }
-//                                 })
-//                             }
-//                         })
-//                     }
-//                 })
-//                 async.series(childTasks, err => {
-//                     callback(err)
-//                 })
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '上传失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-//                     if (failFiles.length) {
-//                         Util.sendResult(res, 0, '以下文件未上传成功', failFiles)
-//                     } else {
-//                         Util.sendResult(res, 0, '上传成功')
-//                     }
-// 				});
-// 			}
-//             connection.release()
-// 		});
-// 	});
-// })
-
-// /**
-//  * @description 在共享目录中下载文件
-//  * @param {Number} root_id 共享目录的根id
-//  * @param {Number} file_id 需要下载的文件id
-//  */
-// router.post('/downloadFileForShare', (req, res, next) => {
-//     const body = req.body
-//     const uid = req.user.uid
-//     let {
-//         root_id,
-//         file_id
-//     } = body
-//     if (!root_id || !file_id) {
-//         Util.sendResult(res, 1003, '参数缺失')
-//         return
-//     }
-//     conn.getConnection((error, connection) => {
-//         if (error) return
-
-//         let dep_id = undefined
-//         let job_id = undefined
-//         let file_path = undefined
-        
-// 		// 创建事务列表
-// 		const tasks = [
-// 			// begin transaction
-// 			function(callback) {
-// 				connection.query('BEGIN', err => {
-// 					callback(err)
-// 				});
-//             },
-//             function(callback) {
-//                 // 查找用户的dep_id和job_id
-//                 connection.query(userQuery.selectUserStaffWithUserId(uid), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         dep_id = rows[0].dep_id
-//                         job_id = rows[0].job_id
-//                     }
-//                     callback(err)
-//                 })
-//             },
-//             function(callback) {
-//                 // 分别使用dep_id、job_id、uid查找root_id的下载文件的权限
-//                 let download_file = false
-//                 let childTasks = [
-//                     function(cb) {
-//                         connection.query(shareQuery.selectShareDirWithDirAndDep(root_id, dep_id), (err, rows) => {
-//                             if (rows && rows.length && rows[0].perms_download) {
-//                                 download_file = true
-//                             }
-//                             cb(err)
-//                         })
-//                     },
-//                     function(cb) {
-//                         connection.query(shareQuery.selectShareDirWithDirAndJob(root_id, job_id), (err, rows) => {
-//                             if (rows && rows.length && rows[0].perms_download) {
-//                                 download_file = true
-//                             }
-//                             cb(err)
-//                         })
-//                     },
-//                     function(cb) {
-//                         connection.query(shareQuery.selectShareDirWithDirAndUser(root_id, uid), (err, rows) => {
-//                             if (rows && rows.length && rows[0].perms_download) {
-//                                 download_file = true
-//                             }
-//                             cb(err)
-//                         })
-//                     }
-//                 ]
-//                 async.series(childTasks, err => {
-//                     if (download_file) {
-//                         callback(err)
-//                     } else {
-//                         Util.sendResult(res, 1004, '没有权限')
-//                         connection.release()
-//                         return
-//                     }
-//                 })
-//             },
-//             function(callback) {
-//                 // 下载文件
-//                 connection.query(fileQuery.selectFileWithFileId(file_id), (err, rows) => {
-//                     if (rows && rows.length) {
-//                         file_path = rows[0].file_path
-//                     }
-//                     callback(err)
-//                 })
-//             }
-// 		]
-// 		async.waterfall(tasks, function(err) {
-// 			if (err) {
-// 				console.error(err)
-// 				connection.query('ROLLBACK', () => {
-// 					Util.sendResult(res, 1000, '下载失败')
-// 				});
-// 			} else {
-// 				connection.query('COMMIT', () => {
-// 					res.download(file_path)
-// 				});
-// 			}
-//             connection.release()
-// 		});
-//     })
-// })
 
 module.exports = router;

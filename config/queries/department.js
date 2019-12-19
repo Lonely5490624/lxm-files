@@ -25,7 +25,6 @@ function addDepartment(values) {
     const sql = `INSERT INTO lxm_user_department (
         dep_name,
         dep_dir,
-        share_dir,
         par_id,
         type,
         address,
@@ -34,7 +33,6 @@ function addDepartment(values) {
     ) VALUES (
         '${values.dep_name}',
         '${values.dep_dir}',
-        '${values.share_dir}',
         '${values.par_id}',
         '${values.type}',
         '${values.address || ''}',

@@ -74,7 +74,7 @@ router.get('/getShareFileWithDirId', (req, res, next) => {
             },
             function(callback) {
                 // 查询目录下面的文件
-                connection.query(fileQuery.selectShareFileWithDirId(dir_id), (err, rows) => {
+                connection.query(`SELECT * FROM lxm_file_file WHERE is_share = 1 AND dir_id = ${dir_id} AND is_delete = 0`, (err, rows) => {
                     if (rows && rows.length) {
                         result_arr = rows
                     }
@@ -175,20 +175,22 @@ router.post('/uploadFile', (req, res, next) => {
             function(callback) {
                 // 保存文件到服务器
                 const childTasks = Object.values(req.files).map((file, index) => {
-                    const path = `${dir_path}/${file.name}`
+                    const show_name = file.name
+                    const true_name = Date.parse(new Date()) + show_name
+                    const path = `${dir_path}/${true_name}`
                     return function(cb) {
                         // 查询当前文件路径是否存在
                         connection.query(fileQuery.selectFileWithPath(path), (err, rows) => {
                             if (rows && rows.length) {
-                                failFiles.push(file.name)
+                                failFiles.push(show_name)
                                 cb(null)
                             } else {
                                 const values = {
                                     dir_id,
-                                    file_name: file.name,
+                                    file_name: show_name,
                                     file_path: path,
                                     type: 1,
-                                    ext: Util.getFileExt(file.name),
+                                    ext: Util.getFileExt(show_name),
                                     size: file.size,
                                     uniq: uuidv1(),
                                     create_uid: uid

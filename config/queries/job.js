@@ -29,7 +29,6 @@ function addJob(values) {
     const sql = `INSERT INTO lxm_user_job (
         job_name,
         job_dir,
-        share_dir,
         dep_id,
         is_manager,
         dep_set,
@@ -38,7 +37,6 @@ function addJob(values) {
     ) VALUES (
         '${values.job_name}',
         '${values.job_dir}',
-        '${values.share_dir}',
         '${values.dep_id}',
         '${values.is_manager}',
         '${values.dep_set}',
@@ -48,8 +46,8 @@ function addJob(values) {
     return sql
 }
 
-function updateJobNameWithId(dep_id, new_name, new_path, update_uid, update_time) {
-    const sql = `UPDATE lxm_user_job SET job_name = '${new_name}', job_dir = '${new_path}', update_uid = '${update_uid}', update_time = NOW()  WHERE job_id = ${dep_id} AND is_delete = 0`
+function updateJobNameWithId(job_id, new_name, new_path, update_uid) {
+    const sql = `UPDATE lxm_user_job SET job_name = '${new_name}', job_dir = '${new_path}', update_uid = '${update_uid}', update_time = NOW()  WHERE job_id = ${job_id} AND is_delete = 0`
     return sql
 }
 

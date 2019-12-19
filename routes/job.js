@@ -62,6 +62,9 @@ router.post('/addJob', (req, res, next) => {
             Util.sendResult(res, 1003, '参数缺失')
             return
         }
+        let show_name = job_name
+        let true_name = Date.parse(new Date()) + show_name
+
         let dep_dir = undefined
         let dep_share_dir = undefined
         let dep_share_dir_id = undefined
@@ -85,7 +88,7 @@ router.post('/addJob', (req, res, next) => {
                     if (rows && rows.length) {
                         dep_dir = rows[0].dep_dir
                         dep_share_dir = rows[0].share_dir
-                        job_dir = `${dep_dir}/${job_name}`
+                        job_dir = `${dep_dir}/${true_name}`
                         job_share_name = `${job_name}共享`
                         job_share_dir = `${dep_share_dir}/${job_name}共享`
                     } else {
@@ -96,7 +99,7 @@ router.post('/addJob', (req, res, next) => {
             },
             function(callback) {
                 // 查看当前岗位是否存在
-                connection.query(jobQuery.selectJobWithPath(job_dir), (err, rows) => {
+                connection.query(`SELECT * FROM lxm_user_job WHERE job_name = '${show_name}' AND is_delete = 0`, (err, rows) => {
                     if (rows && rows.lenght) {
                         Util.sendResult(res, 1000, '该部门下已存在同名岗位')
                         connection.release()
@@ -108,11 +111,10 @@ router.post('/addJob', (req, res, next) => {
             function(callback) {
                 // 新建岗位数据
                 const values = {
-                    job_name,
+                    job_name: show_name,
                     job_dir,
                     is_manager: is_manager ? 1 : 0,
                     dep_set: dep_set ? 1 : 0,
-                    share_dir: job_share_dir,
                     dep_id,
                     create_uid: uid
                 }
@@ -142,43 +144,12 @@ router.post('/addJob', (req, res, next) => {
                 // 创建岗位目录
                 const values = {
                     dir_pid: dep_dir_id,
-                    dir_name: job_name,
+                    dir_name: show_name,
                     path: job_dir,
                     uniq: uuidv1(),
                     create_uid: uid
                 }
                 connection.query(dirQuery.addDir(values), err => {
-                    callback(err)
-                })
-            },
-            function(callback) {
-                // 查询岗位目录dir_id
-                connection.query(dirQuery.selectDirWithPath(job_dir), (err, rows) => {
-                    if (rows && rows.length) {
-                        job_dir_id = rows[0].dir_id
-                    }
-                    callback(err)
-                })
-            },
-            function(callback) {
-                // 根据部门共享目录查询共享目录id
-                connection.query(dirQuery.selectDirShareWithPath(dep_share_dir), (err, rows) => {
-                    if (rows && rows.length) {
-                        dep_share_dir_id = rows[0].dir_id
-                    }
-                    callback(err)
-                })
-            },
-            function(callback) {
-                // 新建岗位共享目录
-                const values = {
-                    dir_pid: dep_share_dir_id,
-                    dir_name: job_share_name,
-                    path: job_share_dir,
-                    uniq: uuidv1(),
-                    create_uid: uid
-                }
-                connection.query(dirQuery.addDirShare(values), err => {
                     callback(err)
                 })
             },
@@ -206,13 +177,12 @@ router.post('/addJob', (req, res, next) => {
 			if (err) {
 				console.error(err)
 				connection.query('ROLLBACK', (err2) => {
-					Util.sendResult(res, 1001, '创建失败')
+					Util.sendResult(res, 1000, '创建失败')
 				});
 			} else {
 				connection.query('COMMIT', () => {
                     // 创建岗位和岗位共享文件夹
                     Util.createStaffDir(job_dir)
-                    Util.createStaffDir(job_share_dir)
 					Util.sendResult(res, 0, '创建成功')
 				});
 			}
@@ -237,14 +207,12 @@ router.post('/updateJob', (req, res, next) => {
             Util.sendResult(res, 1003, '参数缺失')
             return
         }
+        let show_name = new_name
+        let true_name = Date.parse(new Date()) + show_name
+
         let old_name = undefined
         let old_path = undefined
         let new_path = undefined
-        let all_jobs = undefined
-        let all_job_dirs = undefined
-        let old_share_path = undefined
-        let new_share_name = undefined
-        let new_share_path = undefined
         
 		// 创建事务列表
 		const tasks = [
@@ -261,13 +229,8 @@ router.post('/updateJob', (req, res, next) => {
                         old_name =rows[0].job_name
                         old_path = rows[0].job_dir
                         let old_path_arr = old_path.split('/')
-                        old_path_arr[old_path_arr.length - 1] = new_name
+                        old_path_arr[old_path_arr.length - 1] = true_name
                         new_path = old_path_arr.join('/')
-                        old_share_path = rows[0].share_dir
-                        let old_share_path_arr = old_share_path.split('/')
-                        old_share_path_arr[old_share_path_arr.length - 1] = `${new_name}共享`
-                        new_share_path = old_share_path_arr.join('/')
-                        new_share_name = `${new_name}共享`
                     } else {
                         Util.sendResult(res, 1000, '岗位不存在')
                         connection.release()
@@ -277,89 +240,45 @@ router.post('/updateJob', (req, res, next) => {
                 })
             },
             function(callback) {
-                // 查询岗位下所有岗位
-                connection.query(jobQuery.selectJobLikePath(old_path), (err, rows) => {
-                    if (rows && rows.length) {
-                        all_jobs = rows
-                    }
+                // 修改岗位表的名称和目录
+                connection.query(jobQuery.updateJobNameWithId(job_id, show_name, new_path, uid), (err, rows) =>{
                     callback(err)
                 })
             },
             function(callback) {
-                // 修改所有岗位路径
-                const childTasks = all_jobs.map(item => {
-					const new_item_path = item.job_dir.replace(old_path, new_path)
-					return function(callback) {
-						connection.query(jobQuery.updateJobPathWithPath(item.job_dir, new_item_path, new_share_path, uid), err => {
-							callback(err)
-						})
-					}
-				})
-				async.series(childTasks, err => {
-					callback(err)
-				})
-            },
-            function(callback) {
-                // 查询岗位目录下所有目录
-                connection.query(dirQuery.selectDirLikePath(old_path), (err, rows) => {
-                    if (rows && rows.length) {
-                        all_job_dirs = rows
-                    }
-                    callback(err)
-                })
-            },
-            // function(callback) {
-            //     // 查询岗位共享目录下共享目录
-            //     connection.query(dirQuery.selectShareDirWithPath(old_path), (err, rows) => {
-            //         if (rows && rows.length) {
-            //             old_share_path = rows[0].dir_path
-            //         }
-            //         callback(err)
-            //     })
-            // },
-            function(callback) {
-                // 修改共享目录的名称和路径
-                connection.query(dirQuery.updateShareDirNameWithPath(old_share_path, new_share_name, new_share_path, uid), err => {
+                // 修改用户表的目录
+                connection.query(`UPDATE lxm_user_staff SET homefolder=REPLACE(homefolder, '${old_path}', '${new_path}')`, (err, rows) => {
                     callback(err)
                 })
             },
             function(callback) {
-                // 修改岗位目录的名称和路径(目录表)
-				connection.query(dirQuery.updateDirNameWithPath(old_path, new_name, new_path, uid), err => {
-					callback(err)
-				})
+                // 修改目录表的名称
+                connection.query(`UPDATE lxm_file_dir SET dir_name = '${show_name}' WHERE dir_name = '${old_name}'`, err => {
+                    callback(err)
+                })
             },
             function(callback) {
-                // 使用task来修改目录表下所有相关目录的名称和路径(除共享)
-				const childTasks = all_job_dirs.map(item => {
-					const new_item_path = item.dir_path.replace(old_path, new_path)
-					return function(callback) {
-						connection.query(dirQuery.updateDirPathWithPath(item.dir_path, new_item_path, uid), err => {
-							callback(err)
-						})
-					}
-				})
-				async.series(childTasks, err => {
-					callback(err)
-				})
+                // 修改目录表的目录
+                connection.query(`UPDATE lxm_file_dir SET dir_path=REPLACE(dir_path, '${old_path}', '${new_path}')`, (err, rows) => {
+                    callback(err)
+                })
             },
             function(callback) {
-                // 修改岗位名称和路径
-				connection.query(jobQuery.updateJobNameWithId(job_id, new_name, new_path, uid), err => {
-					callback(err)
-				})
+                // 修改文件表中的目录
+                connection.query(`UPDATE lxm_file_file SET file_path=REPLACE(file_path, '${old_path}', '${new_path}')`, (err, rows) => {
+                    callback(err)
+                })
             }
 		]
 		async.waterfall(tasks, function(err, path, dep_dir) {
 			if (err) {
 				console.error(err)
 				connection.query('ROLLBACK', () => {
-					Util.sendResult(res, 1001, '更新失败')
+					Util.sendResult(res, 1000, '更新失败')
 				});
 			} else {
 				connection.query('COMMIT', () => {
                     // 更新岗位和岗位共享文件夹
-					fs.renameSync(old_share_path, new_share_path)
 					fs.renameSync(old_path, new_path)
 					Util.sendResult(res, 0, '更新成功')
 				});

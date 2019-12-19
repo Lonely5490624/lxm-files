@@ -54,6 +54,7 @@ function addDir(values) {
         dir_path,
         uniq,
         depth,
+        can_delete,
         create_uid,
         create_time
     ) VALUES (
@@ -62,6 +63,7 @@ function addDir(values) {
         '${values.path}',
         '${values.uniq}',
         '${values.path.split('/').length - 1}',
+        1,
         '${values.create_uid}',
         NOW()
     )`

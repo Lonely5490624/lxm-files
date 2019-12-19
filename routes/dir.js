@@ -100,7 +100,7 @@ router.get('/getDirList', (req, res, next) => {
                             dir_id: item.dir_id,
                             dir_pid: item.dir_pid,
                             dir_name: item.dir_name,
-                            dir_path: item.dir_path
+                            can_delete: item.can_delete
                         }
                         result_arr.push(obj)
                     })
