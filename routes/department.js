@@ -45,11 +45,10 @@ router.post('/addDepartment', (req, res, next) => {
 		}
 		let show_name = dep_name
 		let true_name = Date.parse(new Date()) + dep_name
+		let show_path = show_name
 
 		let par_dir = undefined			// 上级部门目录
-		let par_share_dir = undefined	// 上级部门共享目录
 		let par_dir_id = undefined		// 上级部门目录的目录id
-		let par_share_dir_id = undefined	// 上级部门共享目录的目录id
 		let dir_path = undefined			// 部门目录
 		let dir_path_id = undefined		// 部门目录的目录id
 		let dir_share_path = undefined	// 部门共享目录
@@ -68,7 +67,6 @@ router.post('/addDepartment', (req, res, next) => {
 					connection.query(depQuery.selectDepWithId(obj.par_id), (err, rows) => {
 						if (rows && rows.length && rows[0].dep_id) {
 							par_dir = rows[0].dep_dir
-							par_share_dir = rows[0].share_dir
 						}
 						callback(err)
 					})
@@ -102,26 +100,7 @@ router.post('/addDepartment', (req, res, next) => {
 				connection.query(dirQuery.selectDirWithPath(par_dir), (err, rows) => {
 					if (rows && rows.length) {
 						par_dir_id = rows[0].dir_id
-						callback(err)
-					} else {
-						callback(err)
-					}
-				})
-			},
-			// function(callback) {
-			// 	// 根据共享目录查找共享目录的id
-			// 	connection.query(dirQuery.selectDirShareWithPath(par_share_dir), (err, rows) => {
-			// 		if (rows && rows.length) {
-			// 			par_share_dir_id = rows[0].dir_id
-			// 		}
-			// 		callback(err)
-			// 	})
-			// },
-			function(callback) {
-				// 根据上一步的返回的上级目录，查找是否存在于目录表，返回dir_id或null
-				connection.query(dirQuery.selectDirWithPath(par_share_dir), (err, rows) => {
-					if (rows && rows.length) {
-						par_share_dir_id = rows[0].dir_id
+						show_path = `${rows[0].dir_name}/${show_name}`
 						callback(err)
 					} else {
 						callback(err)
@@ -133,36 +112,14 @@ router.post('/addDepartment', (req, res, next) => {
 				// 添加部门目录数据到目录表
 				connection.query(dirQuery.addDir({
 					dir_pid: par_dir_id || 0,
-					dir_name: show_name,
+					dir_name: show_path,
 					path: dir_path,
 					uniq: uuidv1(),
 					create_uid: uid
 				}), err => {
 					callback(err)
 				})
-			},
-			// function(callback) {
-			// 	// 查询刚添加的目录的dir_id，返回dir_id和dep_dir
-			// 	connection.query(dirQuery.selectDirWithPath(dir_path), (err, rows) => {
-			// 		if (rows && rows.length) {
-			// 			dir_path_id = rows[0].dir_id
-			// 		}
-			// 		callback(err)
-			// 	})
-			// },
-			// function(callback) {
-			// 	dir_share_path = par_share_dir ? `${par_share_dir}/${obj.dep_name}共享` : `${staffShareDir}/${obj.dep_name}共享`
-			// 	// 添加共享目录到目录表
-			// 	connection.query(dirQuery.addDirShare({
-			// 		dir_pid: par_share_dir_id || 0,
-			// 		dir_name: Util.getDirOrFileName(dir_share_path),
-			// 		path: dir_share_path,
-			// 		uniq: uuidv1(),
-			// 		create_uid: uid
-			// 	}), err => {
-			// 		callback(err)
-			// 	});
-			// }
+			}
 		]
 		async.waterfall(tasks, function(err) {
 			if (err) {
@@ -172,7 +129,7 @@ router.post('/addDepartment', (req, res, next) => {
 				});
 			} else {
 				connection.query('COMMIT', () => {
-					// 创建部门和部门分享文件夹
+					// 创建部门文件夹
 					Util.createStaffDir(dir_path)
 					Util.sendResult(res, 0, '创建成功')
 				});
@@ -200,12 +157,14 @@ router.post('/updateDepartment', (req, res, next) => {
 		} = body
 		let show_name = new_name
 		let true_name = Date.parse(new Date()) + show_name
+		let show_path = show_name
+		let par_id = undefined
 
 		let old_name = undefined
 		let old_path = undefined
 		let all_path = undefined
 		let all_dep_path = undefined
-		let new_path = undefined
+		let new_path = `${staffRootDir}/${true_name}`
 
 		// 创建事务列表
 		const tasks = [
@@ -221,10 +180,31 @@ router.post('/updateDepartment', (req, res, next) => {
 					if (rows && rows.length) {
 						old_name = rows[0].dep_name
 						old_path = rows[0].dep_dir
-						new_path = old_path.replace(old_name, true_name)
+						par_id = rows[0].par_id
 					}
 					callback(err)
 				})
+			},
+			function(callback) {
+				// 如果当前部门不是顶级部门，则找到上级部门的目录名称，再来确认现级部门的目录名称
+				if (par_id === 0) {
+					callback(null)
+				} else {
+					connection.query(`SELECT * FROM lxm_user_department WHERE dep_id = ${par_id} AND is_delete = 0`, (err, rows) => {
+						if (rows && rows.length) {
+							connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path = '${rows[0].dep_dir}' AND is_delete = 0`, (err2, rows2) => {
+								console.log(33333, rows2)
+								if (rows2 && rows2.length) {
+									show_path = `${rows2[0].dir_name}/${show_name}`
+									new_path = `${rows2[0].dir_path}/${true_name}`
+								}
+								callback(err2)
+							})
+						} else {
+							callback(err)
+						}
+					})
+				}
 			},
 			function(callback) {
 				// 修改部门表的名称和目录
@@ -246,7 +226,7 @@ router.post('/updateDepartment', (req, res, next) => {
 			},
 			function(callback) {
 				// 修改目录表的名称
-				connection.query(`UPDATE lxm_file_dir SET dir_name='${show_name}' WHERE dir_name='${old_name}'`, err => {
+				connection.query(`UPDATE lxm_file_dir SET dir_name='${show_path}' WHERE dir_path='${old_path}'`, err => {
 					callback(err)
 				})
 			},

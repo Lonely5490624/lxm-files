@@ -341,6 +341,81 @@ router.get('/getUserStaff', (req, res, next) => {
 	})
 })
 
+router.get('/getUserStaffInfo', (req, res, next) => {
+	const targetUid = req.query.uid
+	const uid = req.user.uid
+	if (!targetUid) {
+		Util.sendResult(res, 1003, '参数缺失')
+		return
+	}
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+		}
+		let userInfo = undefined
+		let job_id = undefined
+		let dep_id = undefined
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 查询用户是否存在
+                connection.query(`SELECT * FROM lxm_user_staff WHERE uid= '${targetUid}'`, (err, rows) => {
+                    if (rows && rows.length) {
+						userInfo = rows[0]
+						job_id = rows[0].job_id
+						dep_id = rows[0].dep_id
+                    } else {
+                        Util.sendResult(res, 1000, '用户不存在')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查询用户岗位信息
+				connection.query(`SELECT * FROM lxm_user_job WHERE job_id = ${job_id}`, (err, rows) => {
+					if (rows && rows.length) {
+						userInfo.jobInfo = rows[0]
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询用户部门信息
+				connection.query(`SELECT * FROM lxm_user_department WHERE dep_id = ${dep_id}`, (err, rows) => {
+					if (rows && rows.length) {
+						userInfo.depInfo = rows[0]
+					}
+					callback(err)
+				})
+			}
+		]
+		async.waterfall(tasks, function(err, path, dep_dir) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '查询失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+					delete userInfo.password
+					Util.sendResult(res, 0, '查询成功', userInfo)
+				});
+			}
+            connection.release()
+		});
+	});
+})
+
 router.get('/canSetDep', (req, res, next) => {
 	const uid = req.user.uid
 	conn.getConnection((error, connection) => {
@@ -432,9 +507,81 @@ router.post('/login', (req, res, next) => {
 })
 
 router.post('/logout', (req, res, next) => {
-	// 退出清除token的cookie
-	res.clearCookie('token')
 	Util.sendResult(res, 0, '退出成功')
+})
+
+router.post('/modifyPwd', (req, res, next) => {
+	const uid = req.user.uid
+	const {
+		oldPassword,
+		newPassword,
+		newPassword2
+	} = req.body
+
+	if (!oldPassword || !newPassword || !newPassword2) {
+		Util.sendResult(res, 1003, '参数缺失')
+		return
+	}
+	if (newPassword !== newPassword2) {
+		Util.sendResult(res, 1000, '两次密码不一样')
+		return
+	}
+
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+		}
+		let oldPwd = undefined
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+			},
+			function(callback) {
+				// 查询当前用户是否存在
+				connection.query(`SELECT * FROM lxm_user_staff WHERE uid='${uid}'`, (err, rows) => {
+					if (rows && rows.length) {
+						oldPwd = rows[0].password
+						if (!Util.comparePassword(oldPassword, oldPwd)) {
+							Util.sendResult(res, 1000, '旧密码不正确')
+							connection.release()
+							return
+						}
+					} else {
+						Util.sendResult(res, 1000, '当前用户不存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 修改用户密码
+				const genPwd = Util.genPassword(newPassword)
+				connection.query(`UPDATE lxm_user_staff SET password='${genPwd}' WHERE uid='${uid}'`, err => {
+					callback(err)
+				})
+			}
+		]
+		async.waterfall(tasks, function(err, path, dep_dir) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '修改失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+					Util.sendResult(res, 0, '修改成功')
+				});
+			}
+            connection.release()
+		});
+	});
 })
 
 module.exports = router;

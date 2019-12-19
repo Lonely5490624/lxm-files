@@ -64,13 +64,12 @@ router.post('/addJob', (req, res, next) => {
         }
         let show_name = job_name
         let true_name = Date.parse(new Date()) + show_name
+        let show_path = undefined
 
         let dep_dir = undefined
         let dep_share_dir = undefined
         let dep_share_dir_id = undefined
         let job_dir = undefined
-        let job_share_name = undefined
-        let job_share_dir = undefined
         let dep_dir_id = undefined
         let job_dir_id = undefined
         let job_id = undefined
@@ -89,10 +88,17 @@ router.post('/addJob', (req, res, next) => {
                         dep_dir = rows[0].dep_dir
                         dep_share_dir = rows[0].share_dir
                         job_dir = `${dep_dir}/${true_name}`
-                        job_share_name = `${job_name}共享`
-                        job_share_dir = `${dep_share_dir}/${job_name}共享`
                     } else {
                         Util.sendResult(res, 1000, '部门ID错误')
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 通过部门的dir，找到部门目录的名称，传给show_path
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path = '${dep_dir}' AND is_delete = 0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        show_path = `${rows[0].dir_name}/${show_name}`
                     }
                     callback(err)
                 })
@@ -144,7 +150,7 @@ router.post('/addJob', (req, res, next) => {
                 // 创建岗位目录
                 const values = {
                     dir_pid: dep_dir_id,
-                    dir_name: show_name,
+                    dir_name: show_path,
                     path: job_dir,
                     uniq: uuidv1(),
                     create_uid: uid
@@ -209,6 +215,8 @@ router.post('/updateJob', (req, res, next) => {
         }
         let show_name = new_name
         let true_name = Date.parse(new Date()) + show_name
+        let show_path = undefined
+        let par_dir_id = undefined
 
         let old_name = undefined
         let old_path = undefined
@@ -240,6 +248,24 @@ router.post('/updateJob', (req, res, next) => {
                 })
             },
             function(callback) {
+                // 通过旧岗位目录查询上级目录id
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path='${old_path}'`, (err, rows) => {
+                    if (rows && rows.length) {
+                        par_dir_id = rows[0].dir_pid
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 通过上级目录id查找上级目录名
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id=${par_dir_id}`, (err, rows) => {
+                    if (rows && rows.length) {
+                        show_path = `${rows[0].dir_name}/${show_name}`
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
                 // 修改岗位表的名称和目录
                 connection.query(jobQuery.updateJobNameWithId(job_id, show_name, new_path, uid), (err, rows) =>{
                     callback(err)
@@ -253,7 +279,7 @@ router.post('/updateJob', (req, res, next) => {
             },
             function(callback) {
                 // 修改目录表的名称
-                connection.query(`UPDATE lxm_file_dir SET dir_name = '${show_name}' WHERE dir_name = '${old_name}'`, err => {
+                connection.query(`UPDATE lxm_file_dir SET dir_name = '${show_path}' WHERE dir_path = '${old_path}'`, err => {
                     callback(err)
                 })
             },

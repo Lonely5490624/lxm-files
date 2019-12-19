@@ -165,7 +165,9 @@ router.post('/addDir', (req, res, next) => {
 			// log error, whatever
 			return;
         }
-        let dir_name = body.dir_name
+        const show_name = body.dir_name
+        const true_name = Date.parse(new Date()) + show_name
+
         let dir_pid = body.dir_pid
         let path = undefined
         let is_share = 0
@@ -194,7 +196,7 @@ router.post('/addDir', (req, res, next) => {
                 // 查询上级目录是否存在
                 connection.query(dirQuery.selectDirWithId(dir_pid), (err, rows) => {
                     if (rows && rows.length) {
-                        path = `${rows[0].dir_path}/${dir_name}`
+                        path = `${rows[0].dir_path}/${true_name}`
                         is_share = rows[0].is_share // 若上级目录为分享目录，则下面也为分享目录
                     } else {
                         Util.sendResult(res, 1000, '上级目录不存在')
@@ -206,18 +208,7 @@ router.post('/addDir', (req, res, next) => {
             },
             function(callback) {
                 // 查询当前目录名称是否存在
-                connection.query(dirQuery.selectDirWithName(dir_name), (err, rows) => {
-                    if (rows && rows.length) {
-                        Util.sendResult(res, 1000, '已存在当前目录名称')
-                        connection.release()
-                        return
-                    }
-                    callback(err)
-                })
-            },
-            function(callback) {
-                // 查询当前目录路径是否存在
-                connection.query(dirQuery.selectDirWithName(dir_name), (err, rows) => {
+                connection.query(dirQuery.selectDirWithName(show_name), (err, rows) => {
                     if (rows && rows.length) {
                         Util.sendResult(res, 1000, '已存在当前目录名称')
                         connection.release()
@@ -230,17 +221,13 @@ router.post('/addDir', (req, res, next) => {
                 // 新建目录表数据
                 const values = {
                     dir_pid,
-                    dir_name,
+                    dir_name: show_name,
                     path,
                     uniq: uuidv1(),
                     create_uid: uid
                 }
                 let addDir = null
-                if(is_share === 1) {
-                    addDir = dirQuery.addDirShare
-                } else {
-                    addDir = dirQuery.addDir
-                }
+                addDir = dirQuery.addDir
                 connection.query(addDir(values), err => {
                     callback(err)
                 })
@@ -272,8 +259,10 @@ router.post('/renameDir', (req, res, next) => {
 			// log error, whatever
 			return;
         }
+        const show_name = body.new_name
+        const true_name = Date.parse(new Date()) + show_name
+
         let dir_id = body.dir_id
-        let new_name = body.new_name
         let old_name = undefined
         let path = undefined
         let new_path = undefined
@@ -306,7 +295,7 @@ router.post('/renameDir', (req, res, next) => {
                     if (rows && rows.length) {
                         path = rows[0].dir_path
                         const pathArr = path.split('/')
-                        pathArr[pathArr.length - 1] = new_name
+                        pathArr[pathArr.length - 1] = true_name
                         new_path = pathArr.join('/')
                         old_name = rows[0].dir_name
                     } else {
@@ -357,7 +346,7 @@ router.post('/renameDir', (req, res, next) => {
                 // 修改目录下面的文件路径
                 if (file_arr && file_arr.length) {
                     const childTasks = file_arr.map(item => {
-                        const new_item_path = item.file_path.replace(old_name, new_name)
+                        const new_item_path = item.file_path.replace(old_name, true_name)
                         return function(callback) {
                             connection.query(fileQuery.updateFilePath(item.file_path, new_item_path, uid), err => {
                                 callback(err)
@@ -373,7 +362,7 @@ router.post('/renameDir', (req, res, next) => {
             },
             function(callback) {
                 // 重命名目录
-                connection.query(dirQuery.updateDirNameWithPath(path, new_name, new_path, uid), err => {
+                connection.query(dirQuery.updateDirNameWithPath(path, show_name, new_path, uid), err => {
                     callback(err)
                 })
             }

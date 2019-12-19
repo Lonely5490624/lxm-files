@@ -16,6 +16,7 @@ var dirRouter = require('./routes/dir');
 var fileRouter = require('./routes/file')
 var shareRouter = require('./routes/share')
 var perRouter = require('./routes/permission')
+var collectRouter = require('./routes/collect')
 
 var app = express();
 
@@ -51,6 +52,7 @@ app.use('/api/files', dirRouter)
 app.use('/api/files', fileRouter)
 app.use('/api/files', shareRouter)
 app.use('/api/pers', perRouter)
+app.use('/api/files', collectRouter)
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
