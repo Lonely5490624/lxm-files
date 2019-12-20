@@ -95,7 +95,7 @@ router.get('/getDirList', (req, res, next) => {
 			} else {
 				connection.query('COMMIT', () => {
                     let result_arr = []
-                    dir_arr.map(item => {
+                    dir_arr && dir_arr.length && dir_arr.map(item => {
                         let obj = {
                             dir_id: item.dir_id,
                             dir_pid: item.dir_pid,

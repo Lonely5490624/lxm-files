@@ -150,7 +150,7 @@ router.post('/regUserCommon', (req, res, next) => {
 	});
 })
 
-router.post("/regUserStaff", async (req, res, next) => {
+router.post("/regUserStaff", (req, res, next) => {
 	const body = req.body
 	const uid = req.user.uid
     conn.getConnection(function(error, connection) {

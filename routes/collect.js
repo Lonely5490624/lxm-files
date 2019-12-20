@@ -200,8 +200,9 @@ router.post('/cancelCollect', (req, res, next) => {
                  * 若在则删除再更新到用户表中
                  */
                 if (collectList && collectList.includes(file_id)) {
-                    const newList = collectList.filter(item => item !== file_id)
-                    connection.query(`UPDATE lxm_user_staff SET collect_files=${newList} WHERE uid='${uid}'`, err => {
+                    const newArr = collectList.filter(item => item !== file_id)
+                    const newList = newArr.join()
+                    connection.query(`UPDATE lxm_user_staff SET collect_files='${newList}' WHERE uid='${uid}'`, err => {
                         callback(err)
                     })
                 } else {
