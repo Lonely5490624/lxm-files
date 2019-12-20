@@ -21,7 +21,7 @@ router.get('/getJobList', (req, res, next) => {
     conn.getConnection((error, connection) => {
         if (error) return
         connection.query(jobQuery.selectJobWithDepId(dep_id), (err, rows) => {
-            if (rows && rows.length) {
+            if (rows) {
                 Util.sendResult(res, 0, '查询成功', rows)
                 connection.release()
             } else {
@@ -48,7 +48,6 @@ router.post('/addJob', (req, res, next) => {
             dep_set,
             create_user,
             modify_userinfo,
-            modify_password,
             create_dir,
             upload_file,
             download_file,
@@ -165,7 +164,6 @@ router.post('/addJob', (req, res, next) => {
                     job_id,
                     create_user,
                     modify_userinfo,
-                    modify_password,
                     create_dir,
                     upload_file,
                     download_file,
@@ -200,6 +198,19 @@ router.post('/addJob', (req, res, next) => {
 router.post('/updateJob', (req, res, next) => {
     const body = req.body
     const uid = req.user.uid
+    const {
+        is_manager,
+        dep_set,
+        create_user,
+        modify_userinfo,
+        create_dir,
+        upload_file,
+        download_file,
+        delete_file,
+        delete_dir,
+        rename_file,
+        rename_dir
+    } = req.body
     conn.getConnection(function(error, connection) {
 		if (error) {
 			// log error, whatever
@@ -294,6 +305,27 @@ router.post('/updateJob', (req, res, next) => {
                 connection.query(`UPDATE lxm_file_file SET file_path=REPLACE(file_path, '${old_path}', '${new_path}')`, (err, rows) => {
                     callback(err)
                 })
+            },
+            function(callback) {
+                // 修改岗位表中的is_manager和dep_set权限
+                connection.query(`UPDATE lxm_user_job SET is_manager=${is_manager || 0}, dep_set=${dep_set || 0} WHERE job_id=${job_id} AND is_delete=0`, err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 修改权限表中的权限
+                connection.query(`UPDATE lxm_user_permission SET 
+                    create_user=${create_user || 0},
+                    modify_userinfo=${modify_userinfo || 0},
+                    create_dir=${create_dir || 0},
+                    download_file=${download_file || 0},
+                    delete_file=${delete_file || 0},
+                    delete_dir=${delete_dir || 0},
+                    rename_file=${rename_file || 0},
+                    rename_dir=${rename_dir || 0}
+                WHERE job_id=${job_id}`, err => {
+                    callback(err)
+                })
             }
 		]
 		async.waterfall(tasks, function(err, path, dep_dir) {
@@ -314,11 +346,161 @@ router.post('/updateJob', (req, res, next) => {
 	});
 })
 
-router.get('/getJobList', (req, res, next) => {
-    console.log(req.user)
-    conn.getConnection(function(error, connection) {
-        connection.query(jobQuery.selectJobList(), (err, rows) => {
-            Util.sendResult(res, 0, '查询成功', rows)
+// router.get('/getJobList', (req, res, next) => {
+//     console.log(req.user)
+//     conn.getConnection(function(error, connection) {
+//         connection.query(jobQuery.selectJobList(), (err, rows) => {
+//             Util.sendResult(res, 0, '查询成功', rows)
+//             connection.release()
+//         })
+//     })
+// })
+
+router.post('/deleteJob', (req, res, next) => {
+    const uid = req.user.uid
+    const {
+        job_id
+    } = req.body
+    if (!job_id) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+
+    conn.getConnection((error, connection) => {
+        if (error) return;
+        let job_dir = undefined
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询岗位是否存在
+                connection.query(`SELECT * FROM lxm_user_job WHERE job_id=${job_id} AND is_delete=0`, (err, rows)=> {
+                    if (rows && rows.length) {
+                        job_dir = rows[0].job_dir
+                    } else {
+                        Util.sendResult(res, 1000, '岗位不存在')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询岗位下是否还有用户
+                connection.query(`SELECT * FROM lxm_user_staff WHERE job_id=${job_id} AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '岗位下还有用户')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询岗位目录下是否还有文件
+                connection.query(`SELECT * FROM lxm_file_file WHERE file_path like '${job_dir}%' AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '岗位目录下还有文件')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询岗位目录下是否还有目录
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path REGEXP '${job_dir}.+' AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '岗位目录下还有目录')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 删除目录表下的岗位目录数据
+                connection.query(`UPDATE lxm_file_dir SET is_delete=1, delete_uid='${uid}', delete_time=NOW() WHERE dir_path='${job_dir}' AND is_delete=0`, err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 删除岗位表中的岗位数据
+                connection.query(`UPDATE lxm_user_job SET is_delete=1, delete_uid='${uid}', delete_time=NOW() WHERE job_id='${job_id}' AND is_delete=0`, err => {
+                    callback(err)
+                })
+            }
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '删除失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '删除成功')
+                })
+            }
+            connection.release()
+        })
+    })
+})
+
+router.get('/getJobInfo', (req, res, next) => {
+    const uid = req.user.uid
+    const {
+        job_id
+    } = req.query
+    if (!job_id) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+
+    conn.getConnection((error, connection) => {
+        if (error) return;
+        let jobInfo = undefined
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询岗位信息
+                connection.query(`SELECT * FROM lxm_user_job WHERE job_id=${job_id} AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        jobInfo = rows[0]
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询岗位权限信息
+                connection.query(`SELECT * FROM lxm_user_permission WHERE job_id=${job_id}`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Object.assign(jobInfo, rows[0])
+                    }
+                    callback(err)
+                })
+            }
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '查询失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '查询成功', jobInfo)
+                })
+            }
             connection.release()
         })
     })

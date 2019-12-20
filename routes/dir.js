@@ -167,6 +167,7 @@ router.post('/addDir', (req, res, next) => {
         }
         const show_name = body.dir_name
         const true_name = Date.parse(new Date()) + show_name
+        let show_path = undefined
 
         let dir_pid = body.dir_pid
         let path = undefined
@@ -197,6 +198,7 @@ router.post('/addDir', (req, res, next) => {
                 connection.query(dirQuery.selectDirWithId(dir_pid), (err, rows) => {
                     if (rows && rows.length) {
                         path = `${rows[0].dir_path}/${true_name}`
+                        show_path = `${rows[0].dir_name}/${show_name}`
                         is_share = rows[0].is_share // 若上级目录为分享目录，则下面也为分享目录
                     } else {
                         Util.sendResult(res, 1000, '上级目录不存在')
@@ -221,7 +223,7 @@ router.post('/addDir', (req, res, next) => {
                 // 新建目录表数据
                 const values = {
                     dir_pid,
-                    dir_name: show_name,
+                    dir_name: show_path,
                     path,
                     uniq: uuidv1(),
                     create_uid: uid

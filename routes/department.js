@@ -261,4 +261,110 @@ router.post('/updateDepartment', (req, res, next) => {
 	});
 })
 
+router.post('/deleteDep', (req, res, next) => {
+    const uid = req.user.uid
+    const {
+        dep_id
+    } = req.body
+    if (!dep_id) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+
+    conn.getConnection((error, connection) => {
+		if (error) return;
+		let dep_dir = undefined
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查询部门是否存在
+				connection.query(`SELECT * FROM lxm_user_department WHERE dep_id=${dep_id} AND is_delete=0`, (err, rows) =>{
+					if (rows && rows.length) {
+						dep_dir = rows[0].dep_dir
+					} else {
+						Util.sendResult(res, 1000, '部门不存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询部门下是否还有岗位
+				connection.query(`SELECT * FROM lxm_user_department WHERE par_id=${dep_id} AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '部门下还有部门')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询部门下是否还有岗位
+				connection.query(`SELECT * FROM lxm_user_job WHERE dep_id=${dep_id} AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '部门下还有岗位')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询部门下是否还有文件
+                connection.query(`SELECT * FROM lxm_file_file WHERE file_path like '${dep_dir}%' AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '部门目录下还有文件')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+			},
+            function(callback) {
+                // 查询部门目录下是否还有目录
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path REGEXP '${dep_dir}.+' AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '部门目录下还有目录')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 删除目录表下的部门目录数据
+                connection.query(`UPDATE lxm_file_dir SET is_delete=1, delete_uid='${uid}', delete_time=NOW() WHERE dir_path='${dep_dir}' AND is_delete=0`, err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 删除部门表中的部门数据
+                connection.query(`UPDATE lxm_user_department SET is_delete=1, delete_uid='${uid}', delete_time=NOW() WHERE dep_id='${dep_id}' AND is_delete=0`, err => {
+                    callback(err)
+                })
+            }
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '删除失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '删除成功')
+                })
+            }
+            connection.release()
+        })
+    })
+})
+
 module.exports = router;

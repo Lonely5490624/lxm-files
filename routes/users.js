@@ -173,6 +173,10 @@ router.post("/regUserStaff", async (req, res, next) => {
             Util.sendResult(res, 1003, '参数缺失')
             return
 		}
+		let show_name = username
+		let trueName = Date.parse(new Date()) + show_name
+		let show_path = undefined
+
 		let job_dir = undefined
 		let homefolder = undefined
 		let new_user = undefined
@@ -238,7 +242,7 @@ router.post("/regUserStaff", async (req, res, next) => {
 				connection.query(jobQuery.selectJobWithId(job_id), (err, rows) => {
 					if (rows && rows.length) {
 						job_dir = rows[0].job_dir
-						homefolder = `${job_dir}/${username}`
+						homefolder = `${job_dir}/${trueName}`
 					} else {
 						Util.sendResult(res, 1000, '岗位不存在')
 						connection.release()
@@ -252,6 +256,7 @@ router.post("/regUserStaff", async (req, res, next) => {
 				connection.query(dirQuery.selectDirWithPath(job_dir), (err, rows) => {
 					if (rows && rows.length) {
 						dir_pid = rows[0].dir_id
+						show_path = `${rows[0].dir_name}/${show_name}`
 					} else {
 						Util.sendResult(res, 1000, '岗位目录不存在')
 						connection.release()
@@ -266,6 +271,7 @@ router.post("/regUserStaff", async (req, res, next) => {
 					uid: uuidv1(),
 					username,
 					password: Util.genPassword(password),
+					show_path,
 					homefolder,
 					dep_id,
 					job_id,
@@ -284,7 +290,7 @@ router.post("/regUserStaff", async (req, res, next) => {
 				// 将员工的目录添加到目录表
 				let values = {
 					dir_pid,
-					dir_name: username,
+					dir_name: show_path,
 					path: homefolder,
 					uniq: uuidv1(),
 					create_uid: uid
@@ -368,6 +374,76 @@ router.get('/getUserStaffInfo', (req, res, next) => {
             function(callback) {
                 // 查询用户是否存在
                 connection.query(`SELECT * FROM lxm_user_staff WHERE uid= '${targetUid}'`, (err, rows) => {
+                    if (rows && rows.length) {
+						userInfo = rows[0]
+						job_id = rows[0].job_id
+						dep_id = rows[0].dep_id
+                    } else {
+                        Util.sendResult(res, 1000, '用户不存在')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查询用户岗位信息
+				connection.query(`SELECT * FROM lxm_user_job WHERE job_id = ${job_id}`, (err, rows) => {
+					if (rows && rows.length) {
+						userInfo.jobInfo = rows[0]
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询用户部门信息
+				connection.query(`SELECT * FROM lxm_user_department WHERE dep_id = ${dep_id}`, (err, rows) => {
+					if (rows && rows.length) {
+						userInfo.depInfo = rows[0]
+					}
+					callback(err)
+				})
+			}
+		]
+		async.waterfall(tasks, function(err, path, dep_dir) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '查询失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+					delete userInfo.password
+					Util.sendResult(res, 0, '查询成功', userInfo)
+				});
+			}
+            connection.release()
+		});
+	});
+})
+
+router.get('/getMyInfo', (req, res, next) => {
+	const uid = req.user.uid
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+		}
+		let userInfo = undefined
+		let job_id = undefined
+		let dep_id = undefined
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 查询用户是否存在
+                connection.query(`SELECT * FROM lxm_user_staff WHERE uid= '${uid}'`, (err, rows) => {
                     if (rows && rows.length) {
 						userInfo = rows[0]
 						job_id = rows[0].job_id
@@ -582,6 +658,207 @@ router.post('/modifyPwd', (req, res, next) => {
             connection.release()
 		});
 	});
+})
+
+router.post('/deleteUser', (req, res, next) => {
+    const uid = req.user.uid
+	const targetUid = req.body.uid
+	
+    if (!targetUid) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+
+    conn.getConnection((error, connection) => {
+		if (error) return;
+		let homefolder = undefined
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查找用户是否存在
+				connection.query(`SELECT * FROM lxm_user_staff WHERE uid='${targetUid}' AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						homefolder = rows[0].homefolder
+					} else {
+						Util.sendResult(res, 1000, '用户不存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+            function(callback) {
+                // 查询用户目录下是否还有文件
+                connection.query(`SELECT * FROM lxm_file_file WHERE file_path like '${homefolder}%' AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '用户目录下还有文件')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询用户目录下是否还有目录
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path REGEXP '${homefolder}.+' AND is_delete=0`, (err, rows) => {
+                    if (rows && rows.length) {
+                        Util.sendResult(res, 1000, '用户目录下还有目录')
+                        connection.release()
+                        return
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 删除目录表下的用户目录数据
+                connection.query(`UPDATE lxm_file_dir SET is_delete=1, delete_uid='${uid}', delete_time=NOW() WHERE dir_path='${homefolder}' AND is_delete=0`, err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 删除用户表中的用户数据
+                connection.query(`UPDATE lxm_user_staff SET is_delete=1, delete_uid='${uid}', delete_time=NOW() WHERE uid='${targetUid}' AND is_delete=0`, err => {
+                    callback(err)
+                })
+            }
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '删除失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '删除成功')
+                })
+            }
+            connection.release()
+        })
+    })
+})
+
+router.post('/modifyStaffInfo', (req, res, next) => {
+	const uid = req.user.uid
+	const {
+		username,
+		password,
+		job_number,
+		phone_number,
+		true_name,
+		nick_name,
+		ID_card
+	} = req.body
+	targetUid = req.body.uid
+    if (!targetUid || !username || !password || !job_number || !phone_number || !true_name || !ID_card) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+
+    conn.getConnection((error, connection) => {
+        if (error) return;
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查询用户是否存在
+				connection.query(`SELECT * FROM lxm_user_staff WHERE  uid='${targetUid}'`, (err, rows) => {
+					if (rows && rows.length) {
+					} else {
+						Util.sendResult(res, 1000, '用户不存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询用户名是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE username='${username}' AND uid!='${targetUid}'`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '用户名已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询工号是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE job_number='${job_number}' AND uid!='${targetUid}'`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '工号已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询电话号码是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE phone_number='${phone_number}' AND uid!='${targetUid}'`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '手机号码已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询身份证号码是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE ID_card='${ID_card}' AND uid!='${targetUid}'`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '身份证号码已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 修改用户表的用户数据
+				connection.query(`UPDATE lxm_user_staff SET
+					username='${username}',
+					password='${Util.genPassword(password)}',
+					job_number='${job_number}',
+					phone_number='${phone_number}',
+					true_name='${true_name}',
+					nick_name='${nick_name}',
+					ID_card='${ID_card}',
+					update_uid='${uid}',
+					update_time=NOW()
+				WHERE uid='${targetUid}'`, err => {
+					callback(err)
+				})
+			}
+			// function(callback) {
+			// 	// 若修改用户名，则要修改用户名对应的目录和文件路径
+			// }
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '修改失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '修改成功')
+                })
+            }
+            connection.release()
+        })
+    })
 })
 
 module.exports = router;
