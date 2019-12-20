@@ -225,6 +225,7 @@ router.post('/addDir', (req, res, next) => {
                     dir_pid,
                     dir_name: show_path,
                     path,
+                    can_delete: 1,
                     uniq: uuidv1(),
                     create_uid: uid
                 }

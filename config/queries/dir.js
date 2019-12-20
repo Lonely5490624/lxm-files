@@ -63,7 +63,7 @@ function addDir(values) {
         '${values.path}',
         '${values.uniq}',
         '${values.path.split('/').length - 1}',
-        1,
+        ${values.can_delete || 0},
         '${values.create_uid}',
         NOW()
     )`
