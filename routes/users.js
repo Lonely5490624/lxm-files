@@ -21,7 +21,6 @@ router.post('/superReg', (req, res, next) => {
 			homefolder,
 			dep_id,
 			job_id,
-			job_number,
 			phone_number,
 			true_name,
 			nick_name,
@@ -37,7 +36,6 @@ router.post('/superReg', (req, res, next) => {
 			'${process.cwd()}/files',
 			0,
 			0,
-			'001',
 			'16666666666',
 			'超级管理员',
 			'乐学猫',
@@ -163,13 +161,12 @@ router.post("/regUserStaff", (req, res, next) => {
 			password,
 			dep_id,
 			job_id,
-			job_number,
 			phone_number,
 			true_name,
 			nick_name,
 			ID_card
 		} = body
-        if (!username || !password || !dep_id || !job_id || !job_number || !phone_number || !true_name || !ID_card) {
+        if (!username || !password || !dep_id || !job_id || !phone_number || !true_name || !ID_card) {
             Util.sendResult(res, 1003, '参数缺失')
             return
 		}
@@ -218,17 +215,6 @@ router.post("/regUserStaff", (req, res, next) => {
 				connection.query(userQuery.selectUserStaffWithUsername(username), (err, rows) => {
 					if (rows && rows.length) {
 						Util.sendResult(res, 1000, '用户名已存在')
-						connection.release()
-						return
-					}
-					callback(err)
-				})
-			},
-			function(callback) {
-				// 查询工号是否重复
-				connection.query(`SELECT * FROM lxm_user_staff WHERE job_number='${job_number}' AND is_delete=0`, (err, rows) => {
-					if (rows && rows.length) {
-						Util.sendResult(res, 1000, '工号已存在')
 						connection.release()
 						return
 					}
@@ -308,7 +294,6 @@ router.post("/regUserStaff", (req, res, next) => {
 					homefolder,
 					dep_id,
 					job_id,
-					job_number,
 					phone_number,
 					true_name,
 					nick_name,
@@ -781,20 +766,30 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 	const {
 		username,
 		password,
-		job_number,
+		dep_id,
+		job_id,
 		phone_number,
 		true_name,
 		nick_name,
 		ID_card
 	} = req.body
 	targetUid = req.body.uid
-    if (!targetUid || !username || !password || !job_number || !phone_number || !true_name || !ID_card) {
+    if (!targetUid || !username || !password || !dep_id || !job_id || !phone_number || !true_name || !ID_card) {
         Util.sendResult(res, 1003, '参数缺失')
         return
     }
 
     conn.getConnection((error, connection) => {
-        if (error) return;
+		if (error) return;
+		let modifyJobFlag = false
+		
+		let old_dep_id = undefined
+		let old_job_id = undefined
+		let old_username = undefined
+		let time_name = undefined
+		let old_show_path = undefined
+		let old_homefolder = undefined
+		let new_homefolder = undefined
 
         const tasks = [
             function(callback) {
@@ -806,6 +801,13 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 				// 查询用户是否存在
 				connection.query(`SELECT * FROM lxm_user_staff WHERE  uid='${targetUid}'`, (err, rows) => {
 					if (rows && rows.length) {
+						old_dep_id = rows[0].dep_id
+						old_job_id = rows[0].job_id
+						old_username = rows[0].username
+						old_homefolder = rows[0].homefolder
+						let homefolderArr = old_homefolder.split('/')
+						time_name = homefolderArr[homefolderArr.length - 1]
+						old_show_path = rows[0].show_path
 					} else {
 						Util.sendResult(res, 1000, '用户不存在')
 						connection.release()
@@ -819,17 +821,6 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 				connection.query(`SELECT * FROM lxm_user_staff WHERE username='${username}' AND uid!='${targetUid}'`, (err, rows) => {
 					if (rows && rows.length) {
 						Util.sendResult(res, 1000, '用户名已存在')
-						connection.release()
-						return
-					}
-					callback(err)
-				})
-			},
-			function(callback) {
-				// 查询工号是否重复
-				connection.query(`SELECT * FROM lxm_user_staff WHERE job_number='${job_number}' AND uid!='${targetUid}'`, (err, rows) => {
-					if (rows && rows.length) {
-						Util.sendResult(res, 1000, '工号已存在')
 						connection.release()
 						return
 					}
@@ -863,7 +854,6 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 				connection.query(`UPDATE lxm_user_staff SET
 					username='${username}',
 					password='${Util.genPassword(password)}',
-					job_number='${job_number}',
 					phone_number='${phone_number}',
 					true_name='${true_name}',
 					nick_name='${nick_name}',
@@ -873,6 +863,90 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 				WHERE uid='${targetUid}'`, err => {
 					callback(err)
 				})
+			},
+			function(callback) {
+				/**
+				 * 如果部门/岗位ID和旧的部门/岗位ID不一样，表示要进行部门和岗位的修改
+				 * 否则表示不需要修改
+				 */
+				if (old_dep_id !== dep_id || old_job_id !== job_id) {
+					modifyJobFlag = true
+					let job_dir = undefined
+					let job_dir_id = undefined
+					let job_name = undefined
+					let true_path = undefined
+
+					const childTasks = [
+						function(cb) {
+							// 查询岗位是否在部门下
+							connection.query(`SELECT * FROM lxm_user_job WHERE dep_id=${dep_id} AND job_id=${job_id} AND is_delete=0`, (err, rows) => {
+								if (rows && rows.length) {
+									job_dir = rows[0].job_dir
+								} else {
+									Util.sendResult(res, 1000, '部门岗位不匹配')
+									connection.release()
+									return
+								}
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 根据岗位目录查询岗位的目录名称
+							connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path='${job_dir}' AND is_delete=0`, (err, rows) => {
+								if (rows && rows.length) {
+									job_name = rows[0].dir_name
+									job_dir_id = rows[0].dir_id
+									show_path = `${job_name}/${old_username}`
+									let dir_pathArr = rows[0].dir_path.split(',')
+									new_homefolder = `${rows[0].dir_path}/${time_name}`
+								}
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 修改用户对应的用户目录
+							connection.query(`UPDATE lxm_user_staff SET show_path='${show_path}', homefolder='${new_homefolder}', update_time=NOW() WHERE uid='${targetUid}'`, err => {
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 修改用户对应的部门/岗位ID
+							connection.query(`UPDATE lxm_user_staff SET dep_id=${dep_id}, job_id=${job_id} WHERE uid='${targetUid}' AND is_delete=0`, err => {
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 修改目录表中用户目录的上级目录id
+							connection.query(`UPDATE lxm_file_dir SET dir_pid=${job_dir_id} WHERE dir_path='${old_homefolder}' AND is_delete=0`, err => {
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 修改目录表中所有的目录名称
+							connection.query(`UPDATE lxm_file_dir SET dir_name=REPLACE(dir_name, '${old_show_path}', '${show_path}')`, err => {
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 修改目录表中所有目录路径
+							connection.query(`UPDATE lxm_file_dir SET dir_path=REPLACE(dir_path, '${old_homefolder}', '${new_homefolder}')`, err => {
+								cb(err)
+							})
+						},
+						function(cb) {
+							// 修改文件表中的所有文件路径
+							connection.query(`UPDATE lxm_file_file SET file_path=REPLACE(file_path, '${old_homefolder}', '${new_homefolder}')`, err => {
+								cb(err)
+							})
+						}
+					]
+
+					async.waterfall(childTasks, err => {
+						callback(err)
+					})
+				} else {
+					callback(null)
+				}
 			}
 			// function(callback) {
 			// 	// 若修改用户名，则要修改用户名对应的目录和文件路径
@@ -886,6 +960,9 @@ router.post('/modifyStaffInfo', (req, res, next) => {
                 })
             } else {
                 connection.query('COMMIT', () => {
+					if (modifyJobFlag) {
+						fs.renameSync(old_homefolder, new_homefolder)
+					}
                     Util.sendResult(res, 0, '修改成功')
                 })
             }
