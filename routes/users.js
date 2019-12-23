@@ -764,7 +764,6 @@ router.post('/deleteUser', (req, res, next) => {
 router.post('/modifyStaffInfo', (req, res, next) => {
 	const uid = req.user.uid
 	const {
-		username,
 		password,
 		dep_id,
 		job_id,
@@ -774,7 +773,7 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 		ID_card
 	} = req.body
 	targetUid = req.body.uid
-    if (!targetUid || !username || !dep_id || !job_id || !phone_number || !true_name || !ID_card) {
+    if (!targetUid || !dep_id || !job_id || !phone_number || !true_name || !ID_card) {
         Util.sendResult(res, 1003, '参数缺失')
         return
     }
@@ -817,17 +816,6 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 				})
 			},
 			function(callback) {
-				// 查询用户名是否重复
-				connection.query(`SELECT * FROM lxm_user_staff WHERE username='${username}' AND uid!='${targetUid}'`, (err, rows) => {
-					if (rows && rows.length) {
-						Util.sendResult(res, 1000, '用户名已存在')
-						connection.release()
-						return
-					}
-					callback(err)
-				})
-			},
-			function(callback) {
 				// 查询电话号码是否重复
 				connection.query(`SELECT * FROM lxm_user_staff WHERE phone_number='${phone_number}' AND uid!='${targetUid}'`, (err, rows) => {
 					if (rows && rows.length) {
@@ -853,7 +841,6 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 				// 修改用户表的用户数据
 				if (password && password.length) {
 					connection.query(`UPDATE lxm_user_staff SET
-						username='${username}',
 						password='${Util.genPassword(password)}',
 						phone_number='${phone_number}',
 						true_name='${true_name}',
@@ -866,7 +853,6 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 					})
 				} else {
 					connection.query(`UPDATE lxm_user_staff SET
-						username='${username}',
 						phone_number='${phone_number}',
 						true_name='${true_name}',
 						nick_name='${nick_name}',
