@@ -225,6 +225,39 @@ router.post("/regUserStaff", (req, res, next) => {
 				})
 			},
 			function(callback) {
+				// 查询工号是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE job_number='${job_number}' AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '工号已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询电话号码是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE phone_number='${phone_number}' AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '手机号码已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询身份证号码是否重复
+				connection.query(`SELECT * FROM lxm_user_staff WHERE ID_card='${ID_card}' AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '身份证号码已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
 				// 查询部门是否存在
 				connection.query(depQuery.selectDepWithId(dep_id), (err, rows) => {
 					if (rows && rows.length) {

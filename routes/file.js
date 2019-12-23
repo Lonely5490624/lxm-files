@@ -174,7 +174,8 @@ router.post('/uploadFile', (req, res, next) => {
             },
             function(callback) {
                 // 保存文件到服务器
-                const childTasks = Object.values(req.files).map((file, index) => {
+                // const childTasks = Object.values(req.files).map((file, index) => {
+                const childTasks = [req.files.file].map((file, index) => {
                     const show_name = file.name
                     const true_name = Date.parse(new Date()) + show_name
                     const path = `${dir_path}/${true_name}`
