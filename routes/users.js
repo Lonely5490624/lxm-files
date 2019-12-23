@@ -774,7 +774,7 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 		ID_card
 	} = req.body
 	targetUid = req.body.uid
-    if (!targetUid || !username || !password || !dep_id || !job_id || !phone_number || !true_name || !ID_card) {
+    if (!targetUid || !username || !dep_id || !job_id || !phone_number || !true_name || !ID_card) {
         Util.sendResult(res, 1003, '参数缺失')
         return
     }
@@ -851,18 +851,32 @@ router.post('/modifyStaffInfo', (req, res, next) => {
 			},
 			function(callback) {
 				// 修改用户表的用户数据
-				connection.query(`UPDATE lxm_user_staff SET
-					username='${username}',
-					password='${Util.genPassword(password)}',
-					phone_number='${phone_number}',
-					true_name='${true_name}',
-					nick_name='${nick_name}',
-					ID_card='${ID_card}',
-					update_uid='${uid}',
-					update_time=NOW()
-				WHERE uid='${targetUid}'`, err => {
-					callback(err)
-				})
+				if (password && password.length) {
+					connection.query(`UPDATE lxm_user_staff SET
+						username='${username}',
+						password='${Util.genPassword(password)}',
+						phone_number='${phone_number}',
+						true_name='${true_name}',
+						nick_name='${nick_name}',
+						ID_card='${ID_card}',
+						update_uid='${uid}',
+						update_time=NOW()
+					WHERE uid='${targetUid}'`, err => {
+						callback(err)
+					})
+				} else {
+					connection.query(`UPDATE lxm_user_staff SET
+						username='${username}',
+						phone_number='${phone_number}',
+						true_name='${true_name}',
+						nick_name='${nick_name}',
+						ID_card='${ID_card}',
+						update_uid='${uid}',
+						update_time=NOW()
+					WHERE uid='${targetUid}'`, err => {
+						callback(err)
+					})
+				}
 			},
 			function(callback) {
 				/**
