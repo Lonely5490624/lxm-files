@@ -109,15 +109,15 @@ router.get('/fileDownload', (req, res, next) => {
         if (error) return
         // 查询用户权限
         connection.query(perQuery.selectPermissionWithUid(uid), (err, rows) => {
-            if (rows && rows.length && rows[0].download_file) {
+            // if (rows && rows.length && rows[0].download_file) {
                 // 下载文件
                 connection.query(fileQuery.selectFileWithFileId(file_id), (err, rows) => {
                     if (err) return
                     res.download(rows[0].file_path)
                 })
-            } else {
-                Util.sendResult(res, 1004, '没有权限')
-            }
+            // } else {
+            //     Util.sendResult(res, 1004, '没有权限')
+            // }
             connection.release()
         })
     })
@@ -234,6 +234,115 @@ router.post('/uploadFile', (req, res, next) => {
 	});
 })
 
+router.post('/uploadCommonFile', (req, res, next) => {
+    const body = req.body
+    const uid = req.user.uid
+    if (!req.files) {
+        Util.sendResult(res, 1000, '请选择文件')
+        return
+    }
+    let dir_id = body.dir_id
+    if (!dir_id) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+    conn.getConnection(function(error, connection) {
+		if (error) {
+			// log error, whatever
+			return;
+        }
+        let dir_path = undefined
+        
+		// 创建事务列表
+		const tasks = [
+			// begin transaction
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				});
+            },
+            function(callback) {
+                // 查询目录是否存在
+                connection.query(dirQuery.selectDirWithId(dir_id), (err, rows) => {
+                    if (rows && rows.length) {
+                        dir_path = rows[0].dir_path
+                    }
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 保存文件到服务器
+                // const childTasks = Object.values(req.files).map((file, index) => {
+                const childTasks = [req.files.file].map((file, index) => {
+                    const show_name = file.name
+                    const path = `${dir_path}/${show_name}`
+                    return function(cb) {
+                        // 查询当前文件路径是否存在
+                        connection.query(fileQuery.selectFileWithPath(path), (err, rows) => {
+                            if (err) {
+                                cb(err)
+                                return
+                            }
+                            if (rows && rows.length) {
+                                // 覆盖文件
+                                connection.query(`UPDATE lxm_file_file SET
+                                    dir_id=${dir_id},
+                                    file_name='${show_name}',
+                                    file_path='${path}',
+                                    type=1,
+                                    ext='${Util.getFileExt(show_name)}',
+                                    size=${file.size},
+                                    uniq='${uuidv1()}',
+                                    create_uid='${uid}'
+                                    WHERE file_path='${path}' AND is_delete=0
+                                `, err2 => {
+                                    cb(err2)
+                                })
+                            } else {
+                                const values = {
+                                    dir_id,
+                                    file_name: show_name,
+                                    file_path: path,
+                                    type: 1,
+                                    ext: Util.getFileExt(show_name),
+                                    size: file.size,
+                                    uniq: uuidv1(),
+                                    create_uid: uid
+                                }
+                                // 保存文件到文件表
+                                connection.query(fileQuery.addFile(values), err2 => {
+                                    if (err2) {
+                                        cb(err2)
+                                    } else {
+                                        file.mv(path)
+                                        cb(null)
+                                    }
+                                })
+                            }
+                        })
+                    }
+                })
+                async.series(childTasks, err => {
+                    callback(err)
+                })
+            }
+		]
+		async.waterfall(tasks, function(err) {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '上传失败')
+				});
+			} else {
+				connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '上传成功')
+				});
+			}
+            connection.release()
+		});
+	});
+})
+
 router.post('/updateFile', (req, res, next) => {
     const body = req.body
     const uid = req.user.uid
@@ -314,6 +423,84 @@ router.post('/updateFile', (req, res, next) => {
 	});
 })
 
+router.post('/modifyCommonFile', (req, res, next) => {
+    const uid = req.user.uid
+    const {
+        file_id,
+        new_name
+    } = req.body
+    if (!file_id || !new_name) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+    }
+
+    conn.getConnection((error, connection) => {
+        if (error) return;
+        let dir_id = undefined
+        let dir_path = undefined
+        let old_file_path = undefined
+        let file_path = undefined
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+            },
+            function(callback) {
+                // 查询文件是否存在
+                connection.query(`SELECT * FROM lxm_file_file WHERE file_id=${file_id} AND is_delete=0`, (err, rows) => {
+                    if (err) callback(err)
+                    else if (rows && rows.length) {
+                        dir_id = rows[0].dir_id
+                        old_file_path = rows[0].file_path
+                        callback(null)
+                    } else {
+                        Util.sendResult(res, 1000, '文件不存在')
+                        connection.release()
+                        return
+                    }
+                })
+            },
+            function(callback) {
+                // 获取文件所在的目录路径
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id=${dir_id} AND is_delete=0`, (err, rows) => {
+                    if (err) callback(err)
+                    else if (rows && rows.length) {
+                        dir_path = rows[0].dir_path
+                        callback(null)
+                    } else {
+                        Util.sendResult(res, 1000, '文件所在目录不存在')
+                        connection.release()
+                        return
+                    }
+                })
+            },
+            function(callback) {
+                // 修改文件名和文件路径
+                file_path = `${dir_path}/${new_name}`
+                connection.query(`UPDATE lxm_file_file SET file_name='${new_name}', file_path='${file_path}' WHERE file_id=${file_id} AND is_delete=0`, err => {
+                    callback(err)
+                })
+            }
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '修改失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    fs.renameSync(old_file_path, file_path)
+                    Util.sendResult(res, 0, '修改成功')
+                })
+            }
+            connection.release()
+        })
+    })
+})
+
 router.post('/deleteFile', (req, res, next) => {
     const body = req.body
     const uid = req.user.uid
@@ -340,15 +527,23 @@ router.post('/deleteFile', (req, res, next) => {
 				});
             },
             function(callback) {
-                // 查询用户权限
-                connection.query(perQuery.selectPermissionWithUid(uid), (err, rows) => {
-                    if (rows && rows.length && rows[0].delete_file) {
+                // 如果是普通用户不考虑权限
+                connection.query(`SELECT * FROM lxm_user_common WHERE uid='${uid}' AND is_delete=0`, (err2, rows2) => {
+                    if (err2) callback(err2)
+                    if (rows2 && rows2.length) {
+                        callback(null)
                     } else {
-                        Util.sendResult(res, 1004, '没有权限')
-                        connection.release()
-                        return
+                        // 查询用户权限
+                        connection.query(perQuery.selectPermissionWithUid(uid), (err, rows) => {
+                            if (rows && rows.length && rows[0].delete_file) {
+                            } else {
+                                Util.sendResult(res, 1004, '没有权限')
+                                connection.release()
+                                return
+                            }
+                            callback(err)
+                        })
                     }
-                    callback(err)
                 })
             },
             function(callback) {

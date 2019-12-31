@@ -6,6 +6,7 @@
     "start": "node ./bin/www"
   },
   "dependencies": {
+    "@alicloud/pop-core": "^1.7.9",
     "async": "^3.1.0",
     "bcrypt": "^3.0.6",
     "cookie-parser": "~1.4.4",

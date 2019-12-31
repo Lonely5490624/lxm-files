@@ -28,12 +28,14 @@ function addUserCommon (values) {
         uid,
         username,
         password,
+        phone,
         homefolder,
         create_time
     ) VALUES (
         '${values.uid}',
         '${values.username}',
         '${values.password}',
+        '${values.phone}',
         '${values.homefolder}',
         NOW()
     )`

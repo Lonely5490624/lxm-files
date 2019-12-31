@@ -12,6 +12,49 @@ const jobQuery = require("../config/queries/job");
 const dirQuery = require('../config/queries/dir')
 const perQuery = require('../config/queries/permission')
 
+const Core = require('@alicloud/pop-core');
+
+var client = new Core({
+  accessKeyId: 'LTAI4FoWfeQFsFKJs8Ns6XZJ',
+  accessKeySecret: 'k71J61DHxoSNFxwgnykcd1hyEecEXm',
+  endpoint: 'https://dysmsapi.aliyuncs.com',
+  apiVersion: '2017-05-25'
+});
+
+var requestOption = {
+  method: 'POST'
+};
+
+let codeMap = new Map();
+
+// 获取短信验证码
+router.post('/getPhoneCode', (req, res, next) => {
+	const {
+		phone
+	} = req.body
+	let phonCode = Math.floor(Math.random() * (9999 - 1000) + 1000)
+	
+	var params = {
+	  "RegionId": "cn-hangzhou",
+	  "PhoneNumbers": phone,
+	  "SignName": "乐学猫",
+	  "TemplateCode": "SMS_181430163",
+	  "TemplateParam": `{\"code\":\"${phonCode}\"}`
+	}
+	client.request('SendSms', params, requestOption).then((result) => {
+		console.log('短信结果：', JSON.stringify(result));
+		codeMap.set(phone, {
+			phone,
+			code: phonCode,
+			time: Date.parse(new Date()) + 5 * 60 * 1000	// 时效为5分钟
+		})
+		Util.sendResult(res, 0, '发送成功')
+	}, (ex) => {
+		console.log('短信发送失败：', ex);
+		Util.sendResult(res, 1000, '发送失败', ex)
+	})
+})
+
 router.post('/superReg', (req, res, next) => {
     conn.getConnection(function(error, connection) {
 		connection.query(`INSERT INTO lxm_user_staff (
@@ -66,12 +109,39 @@ router.post('/regUserCommon', (req, res, next) => {
 		}
 		const {
 			username,
-			password
+			password,
+			phone,
+			code
 		} = body
-		if (!username || !password) {
+		if (!username || !password || !phone || !code) {
 			Util.sendResult(res, 1003, '参数缺失')
 			return
 		}
+		// 验证短信验证码是否有效
+		if (!codeMap.has(phone)) {
+			// 验证码不存在
+			Util.sendResult(res, 1000, '验证码不存在，请先获取验证码')
+			return
+		} else {
+			const codeInfo = codeMap.get(phone)
+			if (codeInfo.time < Date.parse(new Date())) {
+				// 验证码失效
+				Util.sendResult(res, 1000, '验证码已失效，请重新获取')
+				codeMap.delete(phone)
+				return
+			} else {
+				if (+code !== codeInfo.code) {
+					// 验证码不正确
+					Util.sendResult(res, 1000, '验证码不正确')
+					return
+				} else {
+					// 验证码正确，使用一次则销毁
+					codeMap.delete(phone)
+				}
+			}
+		}
+		const commonFolder = `${process.cwd()}/files/common`
+		let commonFolderId = undefined
 		let new_user = undefined
 		let homefolder = undefined
 
@@ -106,12 +176,24 @@ router.post('/regUserCommon', (req, res, next) => {
 				})
 			},
 			function(callback) {
+				// 查询普通用户表是否存在
+				connection.query(`SELECT * FROM lxm_user_common WHERE phone='${phone}' AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						Util.sendResult(res, 1000, '手机号码已存在')
+						connection.release()
+						return
+					}
+					callback(err)
+				})
+			},
+			function(callback) {
 				// 写入普通用户表
 				homefolder = `${process.cwd()}/files/common/${username}`
 				const values = {
 					uid: uuidv1(),
 					username,
 					password: Util.genPassword(password),
+					phone,
 					homefolder
 				}
 				connection.query(userQuery.addUserCommon(values), err => {
@@ -124,6 +206,52 @@ router.post('/regUserCommon', (req, res, next) => {
 					if (rows && rows.length) {
 						new_user = rows[0]
 					}
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询common目录是否存在
+				connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path='${commonFolder}'`, (err, rows) => {
+					if (err) callback(err)
+					if (rows && rows.length) {
+						commonFolderId = rows[0].dir_id
+						callback(null)
+					} else {
+						const values = {
+							dir_pid: 0,
+							dir_name: 'common',
+							path: commonFolder,
+							uniq: uuidv1(),
+							create_uid: new_user.uid
+						}
+						connection.query(dirQuery.addDir(values), err => {
+							callback(err)
+						})
+					}
+				})
+			},
+			function(callback) {
+				if (commonFolderId) {
+					callback(null)
+				} else {
+					connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path='${commonFolder}'`, (err, rows) => {
+						if (rows && rows.length) {
+							commonFolderId = rows[0].dir_id
+						}
+						callback(err)
+					})
+				}
+			},
+			function(callback) {
+				// 写入目录表
+				const values = {
+					dir_pid: commonFolderId,
+					dir_name: username,
+					path: homefolder,
+					uniq: uuidv1(),
+					create_uid: new_user.uid
+				}
+				connection.query(dirQuery.addDir(values), err => {
 					callback(err)
 				})
 			}
@@ -676,6 +804,250 @@ router.post('/modifyPwd', (req, res, next) => {
             connection.release()
 		});
 	});
+})
+
+// 普通用户登录
+router.post('/commonLogin', (req, res, next) => {
+	const body = req.body
+	let {
+		username,
+		password
+	} = body
+	if (!username || !password) {
+		Util.sendResult(res, 1003, '参数缺失')
+		return
+	}
+
+	conn.getConnection((error, connection) => {
+		if (error) return;
+		let uid = undefined
+		let token = undefined
+		let homefolder = undefined
+		let dir_id = undefined
+
+		const tasks = [
+			function(callback) {
+				connection.query('BEGIN', err => {
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询普通用户表是否存在
+				connection.query(`SELECT * FROM lxm_user_common WHERE username='${username}' AND is_delete=0`, (err, rows) => {
+					if (err) callback(err)
+					if (rows && rows.length) {
+						uid = rows[0].uid
+						homefolder = rows[0].homefolder
+						token = Util.genToken({
+							uid
+						})
+						if (Util.comparePassword(password, rows[0].password)) {
+							callback(null)
+						} else {
+							Util.sendResult(res, 1000, '密码错误')
+							connection.release()
+							return
+						}
+					} else {
+						Util.sendResult(res, 1000, '用户名错误')
+						connection.release()
+						return
+					}
+				})
+			},
+			function(callback) {
+				// 更新普通用户表的上次登录时间
+				connection.query(`UPDATE lxm_user_common SET last_login_time=NOW() WHERE uid='${uid}'`, err => {
+					callback(err)
+				})
+			},
+			function(callback) {
+				// 查询用户所在的目录ID
+				connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path='${homefolder}' AND is_delete=0`, (err, rows) => {
+					if (rows && rows.length) {
+						dir_id = rows[0].dir_id
+					}
+					callback(err)
+				})
+			}
+		]
+		async.waterfall(tasks, err => {
+			if (err) {
+				console.error(err)
+				connection.query('ROLLBACK', () => {
+					Util.sendResult(res, 1000, '登录失败')
+				})
+			} else {
+				connection.query('COMMIT', () => {
+					const data = {
+						token: token,
+						userinfo: {
+							username,
+							dir_id
+						}
+					}
+					Util.sendResult(res, 0, '登录成功', data)
+				})
+			}
+			connection.release()
+		})
+	})
+})
+
+// 修改普通用户密码
+router.post('modifyCommonPwd', (req, res, next) => {
+	const uid = req.user.uid
+	const {
+		old_password,
+		new_password,
+		new_password2
+	} = req.body
+
+	if (!old_password || !new_password || !new_password2) {
+		Util.sendResult(res, 1003, '参数缺失')
+		return
+	}
+	if (new_password !== new_password2) {
+		Util.sendResult(res, 1000, '两次密码不一致')
+		return
+	}
+
+    conn.getConnection((error, connection) => {
+        if (error) return;
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查询当前用户是否存在
+				connection.query(`SELECT * FROM lxm_user_common WHERE uid='${uid}' AND is_delete=0`, (err, rows) => {
+					if (err) callback(err)
+					if (rows && rows.length) {
+						const oldPwd = rows[0].password
+						if (!Util.comparePassword(old_password, oldPwd)) {
+							Util.sendResult(res, 1000, '旧密码不正确')
+							connection.release()
+							return
+						}
+					} else {
+						Util.sendResult(res, 1000, '当前用户不存在')
+						connection.release()
+						return
+					}
+				})
+			},
+			function(callback) {
+				// 修改用户密码
+				const genPwd = Util.genPassword(newPassword)
+				connection.query(`UPDATE lxm_user_common SET password='${genPwd}' WHERE uid='${uid}' AND is_delete=0`, err => {
+					callback(err)
+				})
+			}
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '修改失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '修改成功')
+                })
+            }
+            connection.release()
+        })
+    })
+})
+
+// 普通用户找回密码
+router.post('/findCommonPwd', (req, res, next) => {
+    const {
+		username,
+		phone,
+		code,
+		password,
+		password2
+    } = req.body
+    if (!username || !phone || !code || !password || !password2) {
+        Util.sendResult(res, 1003, '参数缺失')
+        return
+	}
+	if (password !== password2) {
+		Util.sendResult(res, 1000, '两次密码不一致')
+		return
+	}
+	
+	// 验证短信验证码是否有效
+	if (!codeMap.has(phone)) {
+		// 验证码不存在
+		Util.sendResult(res, 1000, '验证码不存在，请先获取验证码')
+		return
+	} else {
+		const codeInfo = codeMap.get(phone)
+		if (codeInfo.time < Date.parse(new Date())) {
+			// 验证码失效
+			Util.sendResult(res, 1000, '验证码已失效，请重新获取')
+			codeMap.delete(phone)
+			return
+		} else {
+			if (+code !== codeInfo.code) {
+				// 验证码不正确
+				Util.sendResult(res, 1000, '验证码不正确')
+				return
+			} else {
+				// 验证码正确，使用一次则销毁
+				codeMap.delete(phone)
+			}
+		}
+	}
+
+    conn.getConnection((error, connection) => {
+		if (error) return;
+
+        const tasks = [
+            function(callback) {
+                connection.query('BEGIN', err => {
+                    callback(err)
+                })
+			},
+			function(callback) {
+				// 查询用户名是否存在
+				connection.query(`SELECT * FROM lxm_user_common WHERE username='${username}' AND phone='${phone}' AND is_delete=0`, (err, rows) => {
+					if (err) callback(err)
+					if (rows && rows .length) {
+						callback(null)
+					} else {
+						Util.sendResult(res, 1000, '账号不存在')
+						connection.release()
+						return
+					}
+				})
+			},
+			function(callback) {
+				const genPwd = Util.genPassword(password)
+				connection.query(`UPDATE lxm_user_common SET password='${genPwd}' WHERE username='${username}' AND is_delete=0`, err => {
+					callback(err)
+				})
+			}
+        ]
+        async.waterfall(tasks, err => {
+            if (err) {
+                console.error(err)
+                connection.query('ROLLBACK', () => {
+                    Util.sendResult(res, 1000, '设置失败')
+                })
+            } else {
+                connection.query('COMMIT', () => {
+                    Util.sendResult(res, 0, '设置成功')
+                })
+            }
+            connection.release()
+        })
+    })
 })
 
 router.post('/deleteUser', (req, res, next) => {
