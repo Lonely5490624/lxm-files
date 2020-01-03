@@ -3,7 +3,8 @@ var jwt = require('jsonwebtoken')
 var Util = require('../controller/util')
 
 module.exports = function (req, res, next) {
-    if (req.method === 'OPTIONS' || req.path === '/api/users/login' || req.path === '/api/users/superReg' || req.path === '/api/users/regUserCommon' || req.path === '/api/users/findCommonPwd' || req.path === '/api/users/commonLogin' || req.path === '/api/users/getPhoneCode') {
+    console.log(11111, req.path)
+    if (req.method === 'OPTIONS' || req.path === '/api/users/login' || req.path === '/api/users/superReg' || req.path === '/api/users/regUserCommon' || req.path === '/api/users/findCommonPwd' || req.path === '/api/users/commonLogin' || req.path === '/api/users/getPhoneCode' || req.path === '/api/files/getFileDetail') {
         // 登录不需要token验证
         next()
         return

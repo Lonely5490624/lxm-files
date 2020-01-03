@@ -582,4 +582,22 @@ router.post('/deleteFile', (req, res, next) => {
 	});
 })
 
+// 获取作品文件
+router.get('/getFileDetail', (req, res, next) => {
+    const file_id = req.query.file_id
+    if (!file_id) {
+        Util.sendResult(res, 1000, '没有file_id')
+        return
+    }
+    conn.getConnection((error, connection) => {
+        if (error) return
+        // 下载文件
+        connection.query(fileQuery.selectFileWithFileId(file_id), (err, rows) => {
+            if (err) return
+            res.download(rows[0].file_path)
+        })
+        connection.release()
+    })
+})
+
 module.exports = router;
