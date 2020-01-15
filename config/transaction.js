@@ -36,9 +36,7 @@ let trans = (tran) => {
 
 trans.query = (conn, sql, params) => {
     return new Promise((resolve, reject) => {
-		console.log(4444, sql)
         conn.query(sql, params,(err, result) => {
-            console.log(3333, err, result)
             if(err) {
                 reject(err)
             }else {

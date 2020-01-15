@@ -141,7 +141,11 @@ router.post('/uploadFile', (req, res, next) => {
 			return;
         }
         let dir_path = undefined
+        let dir_pid = undefined
         let failFiles = []
+        let dirUserId = undefined   // 目录所属的用户ID
+        let space_all = undefined   // 目录所属用户的总空间
+        let space_used = undefined  // 目录所属用户的已用空间
         
 		// 创建事务列表
 		const tasks = [
@@ -168,9 +172,63 @@ router.post('/uploadFile', (req, res, next) => {
                 connection.query(dirQuery.selectDirWithId(dir_id), (err, rows) => {
                     if (rows && rows.length) {
                         dir_path = rows[0].dir_path
+                        dir_pid = rows[0].dir_pid
                     }
                     callback(err)
                 })
+            },
+            /**
+             * 一层一层往上查询当前文件所属的用户
+             * 有用户->则找到空间，并且添加已用空间
+             * 没有用户->则递归查找上一级目录，直到目录的上级目录（dir_pid）为0，表示没有不属于用户空间
+             */
+            function(callback) {
+                const findUserFromDir = function(dir_path, dir_pid) {
+                    if (dir_pid === 0) callback(null)
+                    else {
+                        connection.query(`SELECT * FROM lxm_user_staff WHERE homefolder='${dir_path}'`, (err, rows) => {
+                            if (rows) {
+                                if (rows.length) {
+                                    dirUserId = rows[0].uid
+                                    space_all = rows[0].space_all
+                                    space_used = rows[0].space_used
+                                    callback(null)
+                                } else {
+                                    connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id=${dir_pid}`, (err2, rows2) => {
+                                        if (rows2 && rows2.length) {
+                                            const dir_path2 = rows2[0].dir_path
+                                            const dir_pid2 = rows2[0].dir_pid
+                                            findUserFromDir(dir_path2, dir_pid2)
+                                        } else {
+                                            callback(err2)
+                                        }
+                                    })
+                                }
+                            } else {
+                                callback(err)
+                            }
+                        })
+                    }
+                }
+                findUserFromDir(dir_path, dir_pid)
+            },
+            function(callback) {
+                // 验证用户的可用空间
+                if (dirUserId) {
+                    const space_unuse = space_all - space_used
+                    const fileSize = req.files.file.size
+                    if (fileSize > space_unuse) {
+                        Util.sendResult(res, 1000, '空间不足')
+                        connection.release()
+                        return
+                    } else {
+                        connection.query(`UPDATE lxm_user_staff SET space_used=${space_used + fileSize} WHERE uid='${dirUserId}'`, err => {
+                            callback(err)
+                        })
+                    }
+                } else {
+                    callback(null)
+                }
             },
             function(callback) {
                 // 保存文件到服务器
@@ -252,6 +310,10 @@ router.post('/uploadCommonFile', (req, res, next) => {
 			return;
         }
         let dir_path = undefined
+        let dir_pid = undefined
+        let dirUserId = undefined   // 目录所属的用户ID
+        let space_all = undefined   // 目录所属用户的总空间
+        let space_used = undefined  // 目录所属用户的已用空间
         
 		// 创建事务列表
 		const tasks = [
@@ -266,9 +328,63 @@ router.post('/uploadCommonFile', (req, res, next) => {
                 connection.query(dirQuery.selectDirWithId(dir_id), (err, rows) => {
                     if (rows && rows.length) {
                         dir_path = rows[0].dir_path
+                        dir_pid = rows[0].dir_pid
                     }
                     callback(err)
                 })
+            },
+            /**
+             * 一层一层往上查询当前文件所属的用户
+             * 有用户->则找到空间，并且添加已用空间
+             * 没有用户->则递归查找上一级目录，直到目录的上级目录（dir_pid）为0，表示没有不属于用户空间
+             */
+            function(callback) {
+                const findUserFromDir = function(dir_path, dir_pid) {
+                    if (dir_pid === 0) callback(null)
+                    else {
+                        connection.query(`SELECT * FROM lxm_user_common WHERE homefolder='${dir_path}'`, (err, rows) => {
+                            if (rows) {
+                                if (rows.length) {
+                                    dirUserId = rows[0].uid
+                                    space_all = rows[0].space_all
+                                    space_used = rows[0].space_used
+                                    callback(null)
+                                } else {
+                                    connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id=${dir_pid}`, (err2, rows2) => {
+                                        if (rows2 && rows2.length) {
+                                            const dir_path2 = rows2[0].dir_path
+                                            const dir_pid2 = rows2[0].dir_pid
+                                            findUserFromDir(dir_path2, dir_pid2)
+                                        } else {
+                                            callback(err2)
+                                        }
+                                    })
+                                }
+                            } else {
+                                callback(err)
+                            }
+                        })
+                    }
+                }
+                findUserFromDir(dir_path, dir_pid)
+            },
+            function(callback) {
+                // 验证用户的可用空间
+                if (dirUserId) {
+                    const space_unuse = space_all - space_used
+                    const fileSize = req.files.file.size
+                    if (fileSize > space_unuse) {
+                        Util.sendResult(res, 1000, '空间不足')
+                        connection.release()
+                        return
+                    } else {
+                        connection.query(`UPDATE lxm_user_common SET space_used=${space_used + fileSize} WHERE uid='${dirUserId}'`, err => {
+                            callback(err)
+                        })
+                    }
+                } else {
+                    callback(null)
+                }
             },
             function(callback) {
                 // 保存文件到服务器
@@ -517,6 +633,12 @@ router.post('/deleteFile', (req, res, next) => {
 			return;
         }
         let old_file_path = undefined
+        let dir_path = undefined
+        let dir_pid = undefined
+        let dirUserId = undefined   // 目录所属的用户ID
+        let space_all = undefined   // 目录所属用户的总空间
+        let space_used = undefined  // 目录所属用户的已用空间
+        let isCommonUser = false
         
 		// 创建事务列表
 		const tasks = [
@@ -531,6 +653,7 @@ router.post('/deleteFile', (req, res, next) => {
                 connection.query(`SELECT * FROM lxm_user_common WHERE uid='${uid}' AND is_delete=0`, (err2, rows2) => {
                     if (err2) callback(err2)
                     if (rows2 && rows2.length) {
+                        isCommonUser = true
                         callback(null)
                     } else {
                         // 查询用户权限
@@ -558,6 +681,70 @@ router.post('/deleteFile', (req, res, next) => {
                     }
                     callback(err)
                 })
+            },
+            function(callback) {
+                // 查找文件所在的目录，便于计算空间
+                connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id=(SELECT dir_id FROM lxm_file_file WHERE file_id=${file_id} AND is_delete=0)`, (err, rows) => {
+                    if (rows && rows.length) {
+                        dir_path = rows[0].dir_path
+                        dir_pid = rows[0].dir_pid
+                    }
+                    callback(err)
+                })
+            },
+            /**
+             * 一层一层往上查询当前文件所属的用户
+             * 有用户->则找到空间，并且添加已用空间
+             * 没有用户->则递归查找上一级目录，直到目录的上级目录（dir_pid）为0，表示没有不属于用户空间
+             */
+            function(callback) {
+                const findUserFromDir = function(dir_path, dir_pid) {
+                    if (dir_pid === 0) callback(null)
+                    else {
+                        connection.query(`SELECT * FROM ${isCommonUser ? 'lxm_user_common' : 'lxm_user_staff'} WHERE homefolder='${dir_path}'`, (err, rows) => {
+                            if (rows) {
+                                if (rows.length) {
+                                    dirUserId = rows[0].uid
+                                    space_all = rows[0].space_all
+                                    space_used = rows[0].space_used
+                                    callback(null)
+                                } else {
+                                    connection.query(`SELECT * FROM lxm_file_dir WHERE dir_id=${dir_pid}`, (err2, rows2) => {
+                                        if (rows2 && rows2.length) {
+                                            const dir_path2 = rows2[0].dir_path
+                                            const dir_pid2 = rows2[0].dir_pid
+                                            findUserFromDir(dir_path2, dir_pid2)
+                                        } else {
+                                            callback(err2)
+                                        }
+                                    })
+                                }
+                            } else {
+                                callback(err)
+                            }
+                        })
+                    }
+                }
+                findUserFromDir(dir_path, dir_pid)
+            },
+            function(callback) {
+                // 更新用户的可用空间
+                if (dirUserId) {
+                    // 查询当前文件的大小
+                    connection.query(`SELECT * FROM lxm_file_file WHERE file_id=${file_id} AND is_delete=0`, (err, rows) => {
+                        if (rows && rows.length) {
+                            const size = rows[0].size
+                            space_used = space_used - size
+                            connection.query(`UPDATE ${isCommonUser ? 'lxm_user_common' : 'lxm_user_staff'} SET space_used=${space_used} WHERE uid='${dirUserId}'`, err2 => {
+                                callback(err2)
+                            })
+                        } else {
+                            callback(err)
+                        }
+                    })
+                } else {
+                    callback(null)
+                }
             },
             function(callback) {
                 // 删除文件

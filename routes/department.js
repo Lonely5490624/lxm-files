@@ -193,7 +193,6 @@ router.post('/updateDepartment', (req, res, next) => {
 					connection.query(`SELECT * FROM lxm_user_department WHERE dep_id = ${par_id} AND is_delete = 0`, (err, rows) => {
 						if (rows && rows.length) {
 							connection.query(`SELECT * FROM lxm_file_dir WHERE dir_path = '${rows[0].dep_dir}' AND is_delete = 0`, (err2, rows2) => {
-								console.log(33333, rows2)
 								if (rows2 && rows2.length) {
 									show_path = `${rows2[0].dir_name}/${show_name}`
 									new_path = `${rows2[0].dir_path}/${true_name}`
